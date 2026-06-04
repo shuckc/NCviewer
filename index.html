@@ -496,16 +496,20 @@
 
 	let size = 0;
 
-	function resetCamera() {
-		let box = new THREE.Box3().setFromObject(segmentsGroup);
-		
+	function getNonEmptySegmentBox() {
+		const box = new THREE.Box3().setFromObject(segmentsGroup);
 		if (box.isEmpty()) {
-			box = new THREE.Box3(
+			return new THREE.Box3(
 				new THREE.Vector3(-1, -1, -1),
 				new THREE.Vector3(1, 1, 1)
 			);
 		}
-		
+		return box;
+	}
+
+	function resetCamera() {
+		const box = getNonEmptySegmentBox();
+
 		size = box.getSize(new THREE.Vector3()).length();
 		const center = box.getCenter(new THREE.Vector3());
 
@@ -522,8 +526,9 @@
 
 		controls.target.copy(center);
 		controls.update();
-		
+
 		addAxisLines(box);
+		addGridLines(box);
 	}
 
 	const loadBtn = document.getElementById('loadBtn');
@@ -764,15 +769,15 @@ Enjoy!
 			lineSegmentsMesh = null;
 		}
 
-		
 		const axisLines = [];
 		scene.traverse(child => {
-			if (child.userData.isAxisLine) {
+			if (child.userData.isAxisLine || child.userData.isGridLine) {
 				axisLines.push(child);
 			}
 		});
 
 		axisLines.forEach(line => scene.remove(line));
+
 	}
 
 	let currentHighlightDecoration = [];
@@ -876,7 +881,39 @@ Enjoy!
 			scene.add(line);
 		});
 	}
-				
+
+ function niceStep(rough) {
+    const exp = Math.floor(Math.log10(rough));
+    const f = rough / Math.pow(10, exp);
+    const m = f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10;
+    return m * Math.pow(10, exp);
+	}
+
+  function addGridLines(box) {
+    const size = box.getSize(new THREE.Vector3());
+    const extent = Math.max(size.x, size.y, 1) * 2;
+    const minorStep = niceStep(extent / 50);   // ~50 minor cells across
+    const majorStep = minorStep * 10;
+    const half = Math.ceil(extent / majorStep) * majorStep;
+    const z = box.min.z;
+
+    const minor = new THREE.GridHelper(half * 2, (half * 2) / minorStep,
+        colors.gridMinor, colors.gridMinor);
+    const major = new THREE.GridHelper(half * 2, (half * 2) / majorStep,
+        colors.gridMajor, colors.gridMajor);
+
+    [minor, major].forEach(g => {
+        g.rotation.x = Math.PI / 2;                    // XZ → XY
+        g.position.set(0, 0, z);
+        g.material.transparent = true;
+        g.material.opacity = 0.4;
+        g.material.depthWrite = false;
+        g.renderOrder = -1;                             // behind toolpath
+        g.userData.isGridLine = true;
+        scene.add(g);
+    });
+  }
+
 	function selectLineSegments(startIdx, endIdx) {
 		if (!lineSegmentsMesh) return;
 
@@ -943,14 +980,11 @@ Enjoy!
 		const lastIndex = posAttr.count - 1;
 		return new THREE.Vector3().fromArray(posAttr.array, lastIndex * 3);
 	}
-	
+
 	let colors = {
-		selectedColor: 0xFFFFFF,
-		feedColor: 0x39FF14,
-		rapidColor: 0xFF0000,
-		afterSelColor: 0xA6A6A6
+		afterSelColor: 0xA6A6A6,
 	};
-	
+
 	const markerMaterial = new THREE.SpriteMaterial({
 		color: colors.selectedColor,
 		transparent: true,
@@ -964,19 +998,23 @@ Enjoy!
 	scene.add(endMarker);
 	startMarker.visible = false;
 	endMarker.visible = false;
-	
+
 	function updateColorsForTheme(isLight) {
 		if (isLight) {
 			colors.selectedColor = 0x000000;
 			colors.feedColor = 0x000080;
 			colors.rapidColor = 0xFF0000;
+			colors.gridMinor = 0xCCCCCC;
+			colors.gridMajor = 0x888888;
 		} else {
 			colors.selectedColor = 0xFFFFFF;
 			colors.feedColor = 0x39FF14;
 			colors.rapidColor = 0xFF0000;
+			colors.gridMinor = 0x444444;
+			colors.gridMajor = 0x888888;
 		}
 	}
-	
+
 	const toggleTheme = document.getElementById('toggleTheme');
 
 	function applyTheme(isLight) {
@@ -985,13 +1023,30 @@ Enjoy!
 		document.body.classList.toggle('light', isLight);
 		setViewerBackground();
 		updateColorsForTheme(!isLight);
-		
+
 		startMarker.material.color.set(colors.selectedColor);
 		endMarker.material.color.set(colors.selectedColor);
+
+		rebuildGridForTheme();
 
 		if (monacoEditor) {
 			monaco.editor.setTheme(isLight ? 'vs-dark' : 'vs-light');
 		}
+	}
+
+	function rebuildGridForTheme() {
+		const existing = [];
+		scene.traverse(child => {
+			if (child.userData.isGridLine) existing.push(child);
+		});
+
+		existing.forEach(line => {
+			scene.remove(line);
+			line.geometry.dispose();
+			line.material.dispose();
+		});
+
+		addGridLines(getNonEmptySegmentBox());
 	}
 
 	const savedTheme = localStorage.getItem('theme');
