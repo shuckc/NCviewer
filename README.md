@@ -13,3 +13,10 @@ It’s great to see this code being useful in other projects:
 https://plugins.jetbrains.com/plugin/28995-nc-viewer
 
 https://github.com/noahlias/nc_view_vscode
+
+
+## Local quickstart
+
+    $ python -m http.server 8000
+
+Then open http://localhost:8000
