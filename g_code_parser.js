@@ -57,9 +57,9 @@
 				if (y !== undefined) target.Y = motionMode === 'absolute' ? y : currentPosition.Y + y;
 				if (z !== undefined) target.Z = motionMode === 'absolute' ? z : currentPosition.Z + z;
 
-				let axisA = 'X', axisB = 'Y', iKey = 'I', jKey = 'J';
-				if (plane === 'G18') { axisA = 'Z'; axisB = 'X'; iKey = 'K'; jKey = 'I'; }
-				else if (plane === 'G19') { axisA = 'Y'; axisB = 'Z'; iKey = 'J'; jKey = 'K'; }
+				let axisA = 'X', axisB = 'Y', keyA = 'I', keyB = 'J';
+				if (plane === 'G18') { axisA = 'Z'; axisB = 'X'; keyA = 'K'; keyB = 'I'; }
+				else if (plane === 'G19') { axisA = 'Y'; axisB = 'Z'; keyA = 'J'; keyB = 'K'; }
 
 				const startA = currentPosition[axisA];
 				const startB = currentPosition[axisB];
@@ -83,13 +83,14 @@
 					centerA = mx + dir * h * nx;
 					centerB = my + dir * h * ny;
 				} else {
+					const offsetFor = (key) => key === "I" ? iVal : key === "J" ? jVal : kVal;
 					const relCenter = {
-						A: currentPosition[axisA] + (iKey === 'I' ? iVal : jKey === 'I' ? iVal : kVal),
-						B: currentPosition[axisB] + (jKey === 'J' ? jVal : iKey === 'J' ? jVal : kVal)
+						A: currentPosition[axisA] + offsetFor(keyA),
+						B: currentPosition[axisB] + offsetFor(keyB)
 					};
 					const absCenter = {
-						A: (iKey === 'I' ? iVal : jKey === 'I' ? iVal : kVal),
-						B: (jKey === 'J' ? jVal : iKey === 'J' ? jVal : kVal)
+						A: offsetFor(keyA),
+						B: offsetFor(keyB)
 					};
 
 					if (!centerMode && !firstArcDetected.used) {
