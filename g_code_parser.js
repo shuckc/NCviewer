@@ -13,8 +13,8 @@
 		const FULL_CIRCLE_TOLERANCE = 1e-6;
 		const firstArcDetected = { used: false };
 
-		const addMove = (command, x, y, z, feedrate, lineNumber) => {
-			movements.push({ command, X: x, Y: y, Z: z, feedrate, lineNumber });
+		const addMove = (command, x, y, z, feedrate, lineNumber, isArcSegment = false, isArcMidpoint = false) => {
+			movements.push({ command, X: x, Y: y, Z: z, feedrate, lineNumber, isArcSegment, isArcMidpoint });
 		};
 
 		addMove(currentCommand, currentPosition.X, currentPosition.Y, currentPosition.Z, currentFeedrate, 0);
@@ -130,6 +130,7 @@
 					const orthogonalAxis = (plane === 'G17') ? 'Z' : (plane === 'G18') ? 'Y' : 'X';
 					const dOrthogonal = target[orthogonalAxis] - currentPosition[orthogonalAxis];
 
+					const midJ = Math.ceil(segmentCount / 2);
 					for (let j = 1; j <= segmentCount; j++) {
 						const angle = startAngle + (sweep * j) / segmentCount;
 						const ratio = j / segmentCount;
@@ -140,7 +141,7 @@
 						point[orthogonalAxis] = currentPosition[orthogonalAxis] + ratio * dOrthogonal;
 
 						if (!Number.isNaN(point.X) && !Number.isNaN(point.Y) && !Number.isNaN(point.Z)) {
-							addMove('G1', point.X, point.Y, point.Z, currentFeedrate, i);
+							addMove('G1', point.X, point.Y, point.Z, currentFeedrate, i, true, j === midJ);
 						}
 					}
 

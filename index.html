@@ -611,7 +611,89 @@ Enjoy!
 
 	let movements = [];
 	let lineSegmentsMesh = null;
+	let arrowMesh = null;
+	let arrowSegmentIndices = [];
+	let arrowLength = 0;
 	let loadedFilename = "gcode.txt";
+
+	function segmentHasArrow(mv) {
+		if (mv.command === 'G0') return false;
+		if (mv.isArcSegment && !mv.isArcMidpoint) return false;
+		return true;
+	}
+
+	function buildArrowheads() {
+		arrowSegmentIndices = [];
+
+		const arcLengthAtIndex = new Array(movements.length).fill(0);
+		let k = 1;
+		while (k < movements.length) {
+			if (!movements[k].isArcSegment) { k++; continue; }
+			const arcLine = movements[k].lineNumber;
+			let j = k;
+			let total = 0;
+			while (j < movements.length && movements[j].isArcSegment && movements[j].lineNumber === arcLine) {
+				const dx = movements[j].X - movements[j - 1].X;
+				const dy = movements[j].Y - movements[j - 1].Y;
+				const dz = movements[j].Z - movements[j - 1].Z;
+				total += Math.hypot(dx, dy, dz);
+				j++;
+			}
+			for (let m = k; m < j; m++) arcLengthAtIndex[m] = total;
+			k = j;
+		}
+
+		const entries = [];
+		for (let i = 1; i < movements.length; i++) {
+			const mv = movements[i];
+			if (!segmentHasArrow(mv)) continue;
+
+			const start = new THREE.Vector3(movements[i - 1].X, movements[i - 1].Y, movements[i - 1].Z);
+			const end = new THREE.Vector3(mv.X, mv.Y, mv.Z);
+			const delta = new THREE.Vector3().subVectors(end, start);
+			const segmentLength = delta.length();
+
+			const spanLength = mv.isArcSegment ? arcLengthAtIndex[i] : segmentLength;
+			if (spanLength <= arrowLength) continue;
+
+			const direction = delta.divideScalar(segmentLength);
+			const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+			entries.push({ midpoint, direction });
+			arrowSegmentIndices.push(i - 1);
+		}
+
+		if (entries.length === 0) return;
+
+		const geometry = new THREE.ConeGeometry(arrowLength * 0.4, arrowLength, 8);
+		geometry.translate(0, -arrowLength / 2, 0);
+
+		const material = new THREE.MeshBasicMaterial({
+			color: 0xffffff,
+			depthTest: false,
+			transparent: true,
+			opacity: 1.0
+		});
+
+		arrowMesh = new THREE.InstancedMesh(geometry, material, entries.length);
+		arrowMesh.renderOrder = 1;
+
+		const up = new THREE.Vector3(0, 1, 0);
+		const quaternion = new THREE.Quaternion();
+		const scale = new THREE.Vector3(1, 1, 1);
+		const matrix = new THREE.Matrix4();
+		const initColor = new THREE.Color(colors.feedColor);
+
+		for (let i = 0; i < entries.length; i++) {
+			quaternion.setFromUnitVectors(up, entries[i].direction);
+			matrix.compose(entries[i].midpoint, quaternion, scale);
+			arrowMesh.setMatrixAt(i, matrix);
+			arrowMesh.setColorAt(i, initColor);
+		}
+		arrowMesh.instanceMatrix.needsUpdate = true;
+		arrowMesh.instanceColor.needsUpdate = true;
+
+		segmentsGroup.add(arrowMesh);
+	}
 
 	loadBtn.addEventListener('click', () => fileInput.click());
 
@@ -661,6 +743,9 @@ Enjoy!
 		const material = new THREE.LineBasicMaterial({ vertexColors: true });
 		lineSegmentsMesh = new THREE.LineSegments(geometry, material);
 		segmentsGroup.add(lineSegmentsMesh);
+
+		arrowLength = getNonEmptySegmentBox().getSize(new THREE.Vector3()).length() * 0.0084;
+		buildArrowheads();
 
 		slider.value = 0;
 		slider.max = movements.length - 1;
@@ -767,6 +852,13 @@ Enjoy!
 			lineSegmentsMesh.geometry.dispose();
 			lineSegmentsMesh.material.dispose();
 			lineSegmentsMesh = null;
+		}
+
+		if (arrowMesh) {
+			segmentsGroup.remove(arrowMesh);
+			arrowMesh.geometry.dispose();
+			arrowMesh.material.dispose();
+			arrowMesh = null;
 		}
 
 		const axisLines = [];
@@ -945,6 +1037,25 @@ Enjoy!
 		}
 
 		colorAttr.needsUpdate = true;
+
+		if (arrowMesh) {
+			const arrowColor = new THREE.Color();
+			for (let a = 0; a < arrowSegmentIndices.length; a++) {
+				const segmentIndex = arrowSegmentIndices[a];
+				const isSelected = segmentIndex >= startIdx && segmentIndex <= endIdx;
+				const isAfter = segmentIndex > endIdx;
+
+				if (isSelected) {
+					arrowColor.setHex(colors.selectedColor);
+				} else if (isAfter) {
+					arrowColor.setHex(colors.afterSelColor);
+				} else {
+					arrowColor.setHex(colors.feedColor);
+				}
+				arrowMesh.setColorAt(a, arrowColor);
+			}
+			arrowMesh.instanceColor.needsUpdate = true;
+		}
 
 		if (startIdx < movements.length - 1) {
 			const startPos = new THREE.Vector3(movements[startIdx].X, movements[startIdx].Y, movements[startIdx].Z);
