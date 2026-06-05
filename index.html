@@ -378,6 +378,12 @@
   <main id="main">
     <div class="editor" id="editor">
       <div id="codeEditor" style="width:100%; flex: 1 1 auto; min-height: 0;"></div>
+      <div id="wcsPanel" class="tools-panel" style="display: none;">
+        <table>
+          <thead><tr><th>WCS</th><th>X</th><th>Y</th><th>Z</th><th>A</th></tr></thead>
+          <tbody id="wcsTableBody"></tbody>
+        </table>
+      </div>
       <div id="toolsPanel" class="tools-panel" style="display: none;">
         <table>
           <thead><tr><th>Tool</th><th>Radius</th><th>Length</th></tr></thead>
@@ -389,9 +395,12 @@
     <div class="viewer" id="viewer">
       <div class="viewer-info viewer-info-left" id="viewerInfoLeft">
         <span>Plane: <span id="planeText">G17 X-Y</span></span>
+        <span>Coords: <span id="motionModeText">G90 absolute</span></span>
+        <span>WCS: <span id="wcsText">G54</span></span>
         <span>Units: <span id="unitsText">mm</span></span>
         <span>Motion: <span id="motionText">G0 rapid</span></span>
         <span>Spindle: <span id="spindleStateText">Off</span></span>
+        <span>Coolant: <span id="coolantText">Off</span></span>
         <span>Radius comp: <span id="radiusCompText">G40 off</span></span>
       </div>
       <div class="viewer-info" id="viewerInfo">
@@ -1101,6 +1110,29 @@ Enjoy!
 		'G4': 'G4 dwell'
 	};
 	const RADIUS_COMP_LABELS = { 'G40': 'G40 off', 'G41': 'G41 left', 'G42': 'G42 right' };
+	const MOTION_MODE_LABELS = { 'G90': 'G90 absolute', 'G91': 'G91 incremental' };
+
+	function updateWcsPanel(wcsMap) {
+		const panel = document.getElementById('wcsPanel');
+		const tbody = document.getElementById('wcsTableBody');
+		const entries = Object.entries(wcsMap || {});
+		if (entries.length === 0) {
+			panel.style.display = 'none';
+			tbody.innerHTML = '';
+			return;
+		}
+		panel.style.display = '';
+		tbody.innerHTML = '';
+		for (const [code, origin] of entries) {
+			const tr = document.createElement('tr');
+			const x = ((origin && origin.X) ?? 0).toFixed(3);
+			const y = ((origin && origin.Y) ?? 0).toFixed(3);
+			const z = ((origin && origin.Z) ?? 0).toFixed(3);
+			const a = ((origin && origin.A) ?? 0).toFixed(3);
+			tr.innerHTML = `<td>${code}</td><td>${x}</td><td>${y}</td><td>${z}</td><td>${a}</td>`;
+			tbody.appendChild(tr);
+		}
+	}
 
 	function updateToolsPanel(tools) {
 		const panel = document.getElementById('toolsPanel');
@@ -1218,12 +1250,16 @@ Enjoy!
 			document.getElementById('planeText').textContent = PLANE_LABELS[mvState.plane] ?? mvState.plane;
 			document.getElementById('unitsText').textContent = mvState.units;
 			document.getElementById('motionText').textContent = MOTION_LABELS[mvState.motion] ?? mvState.motion;
+			document.getElementById('motionModeText').textContent = MOTION_MODE_LABELS[mvState.motionMode] ?? mvState.motionMode;
+			document.getElementById('wcsText').textContent = mvState.activeWcs;
 			document.getElementById('spindleStateText').textContent = mvState.spindleOn ? 'On' : 'Off';
+			document.getElementById('coolantText').textContent = mvState.coolantOn ? 'On' : 'Off';
 			const radiusLabel = RADIUS_COMP_LABELS[mvState.radiusComp] ?? mvState.radiusComp;
 			const dSuffix = mvState.radiusComp !== 'G40' && mvState.radiusCompTool != null
 				? ` D${mvState.radiusCompTool}`
 				: '';
 			document.getElementById('radiusCompText').textContent = radiusLabel + dSuffix;
+			updateWcsPanel(mvState.wcs);
 			updateToolsPanel(mvState.tools);
 
 		} else {
@@ -1240,8 +1276,12 @@ Enjoy!
 			document.getElementById('planeText').textContent = PLANE_LABELS['G17'];
 			document.getElementById('unitsText').textContent = 'mm';
 			document.getElementById('motionText').textContent = MOTION_LABELS['G0'];
+			document.getElementById('motionModeText').textContent = MOTION_MODE_LABELS['G90'];
+			document.getElementById('wcsText').textContent = 'G54';
 			document.getElementById('spindleStateText').textContent = 'Off';
+			document.getElementById('coolantText').textContent = 'Off';
 			document.getElementById('radiusCompText').textContent = RADIUS_COMP_LABELS['G40'];
+			updateWcsPanel({});
 			updateToolsPanel({});
 		}
 	}

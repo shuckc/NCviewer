@@ -201,14 +201,79 @@ test('initial state partial overrides preserve other defaults', () => {
 	assert.strictEqual(movements[0].X, 0);
 });
 
-test('initial state with motionMode=incremental treats X/Y/Z as deltas', () => {
+test('initial state with motionMode=G91 treats X/Y/Z as deltas', () => {
 	const movements = parseGCode('X3Y4', 64, {
 		X: 10, Y: 10, Z: 0,
-		motionMode: 'incremental',
+		motionMode: 'G91',
 	});
 	const motionMove = movements[1];
 	assert.strictEqual(motionMove.X, 13);
 	assert.strictEqual(motionMove.Y, 14);
+});
+
+test('default motionMode is G90, activeWcs is G54, wcs map is empty, coolantOn is false', () => {
+	const movements = parseGCode('');
+	assert.strictEqual(movements[0].state.motionMode, 'G90');
+	assert.strictEqual(movements[0].state.activeWcs, 'G54');
+	assert.deepStrictEqual(movements[0].state.wcs, {});
+	assert.strictEqual(movements[0].state.coolantOn, false);
+});
+
+test('G91 sets motionMode to G91 in modal state', () => {
+	const movements = parseGCode(sampleGcode);
+	// File line 3 (`G91`) → lineNumber 2
+	const mv = movements.find(m => m.lineNumber === 2);
+	assert.ok(mv);
+	assert.strictEqual(mv.state.motionMode, 'G91');
+});
+
+test('G54-G59 update activeWcs', () => {
+	const movements = parseGCode('G55\nG01X1\nG58\n');
+	const afterG55 = movements.filter(m => m.lineNumber === 0).pop();
+	assert.strictEqual(afterG55.state.activeWcs, 'G55');
+	const afterG58 = movements.filter(m => m.lineNumber === 2).pop();
+	assert.strictEqual(afterG58.state.activeWcs, 'G58');
+});
+
+test('G92 X Y Z stores origin offset in wcs map under activeWcs (no delta when at origin)', () => {
+	const movements = parseGCode(sampleGcode);
+	// File line 5 (`G92X0Y0Z0`) → lineNumber 4. At this point currentPosition is (0,0,0).
+	const mv = movements.filter(m => m.lineNumber === 4).pop();
+	assert.ok(mv, 'should emit a move for the G92 line');
+	assert.deepStrictEqual(mv.state.wcs, { 'G54': { X: 0, Y: 0, Z: 0, A: 0 } });
+});
+
+test('G92 with non-zero deltas computes offset = currentPosition - given', () => {
+	// Move to (10, 20, 0) absolute, then G92 X0 Y0 Z0 — declares current as origin → offset (10, 20, 0)
+	const movements = parseGCode('G90\nG01X10Y20\nG92X0Y0Z0\n');
+	const mv = movements[movements.length - 1];
+	assert.deepStrictEqual(mv.state.wcs['G54'], { X: 10, Y: 20, Z: 0, A: 0 });
+});
+
+test('G92 does not emit motion to its X/Y/Z parameters', () => {
+	// G92 must consume X/Y/Z so they are not interpreted as a move target
+	const movements = parseGCode('G90\nG92X100Y200Z300\n');
+	const last = movements[movements.length - 1];
+	// Position should still be 0,0,0 — G92 modifies WCS, not toolhead position
+	assert.strictEqual(last.X, 0);
+	assert.strictEqual(last.Y, 0);
+	assert.strictEqual(last.Z, 0);
+});
+
+test('G92 against a non-default WCS targets that WCS only', () => {
+	const movements = parseGCode('G55\nG92X0Y0Z0\n');
+	const mv = movements[movements.length - 1];
+	assert.deepStrictEqual(mv.state.wcs, { 'G55': { X: 0, Y: 0, Z: 0, A: 0 } });
+	assert.strictEqual(mv.state.activeWcs, 'G55');
+});
+
+test('M07/M08 turn coolant on; M09 turns it off', () => {
+	const onMist = parseGCode('M07\n');
+	assert.strictEqual(onMist[onMist.length - 1].state.coolantOn, true);
+	const onFlood = parseGCode('M08\n');
+	assert.strictEqual(onFlood[onFlood.length - 1].state.coolantOn, true);
+	const off = parseGCode('M08\nM09\n');
+	assert.strictEqual(off[off.length - 1].state.coolantOn, false);
 });
 
 test('G21 sets units to mm; G20 sets units to inch', () => {

@@ -8,15 +8,18 @@
 			Z: initialState.Z ?? 0,
 		};
 		let centerMode = initialState.centerMode ?? null;
-		let motionMode = initialState.motionMode ?? 'absolute';
 
 		let modalState = {
 			feedrate: initialState.feedrate ?? null,
 			spindleSpeed: initialState.spindleSpeed ?? null,
 			spindleOn: initialState.spindleOn ?? false,
+			coolantOn: initialState.coolantOn ?? false,
 			motion: initialState.motion ?? 'G0',
+			motionMode: initialState.motionMode ?? 'G90',
 			plane: initialState.plane ?? 'G17',
 			units: initialState.units ?? 'mm',
+			activeWcs: initialState.activeWcs ?? 'G54',
+			wcs: initialState.wcs ?? {},
 			tools: initialState.tools ?? {},
 			radiusComp: initialState.radiusComp ?? 'G40',
 			radiusCompTool: initialState.radiusCompTool ?? null,
@@ -63,10 +66,29 @@
 			for (const g of gCodes) {
 				if (g === 90.1) centerMode = 'absolute';
 				else if (g === 91.1) centerMode = 'relative';
-				else if (g === 90) motionMode = 'absolute';
-				else if (g === 91) motionMode = 'incremental';
+				else if (g === 90) setModal({ motionMode: 'G90' });
+				else if (g === 91) setModal({ motionMode: 'G91' });
 				else if (g === 20) setModal({ units: 'inch' });
 				else if (g === 21) setModal({ units: 'mm' });
+				else if ([54, 55, 56, 57, 58, 59].includes(g)) setModal({ activeWcs: `G${g}` });
+				else if (g === 92) {
+					const gx = params['X']?.[0];
+					const gy = params['Y']?.[0];
+					const gz = params['Z']?.[0];
+					const ga = params['A']?.[0];
+					const active = modalState.activeWcs;
+					const prev = modalState.wcs[active] || { X: 0, Y: 0, Z: 0, A: 0 };
+					const next = { ...prev };
+					if (gx !== undefined) next.X = currentPosition.X - gx;
+					if (gy !== undefined) next.Y = currentPosition.Y - gy;
+					if (gz !== undefined) next.Z = currentPosition.Z - gz;
+					if (ga !== undefined) next.A = -ga;
+					setModal({ wcs: { ...modalState.wcs, [active]: next } });
+					delete params['X'];
+					delete params['Y'];
+					delete params['Z'];
+					delete params['A'];
+				}
 				else if (g === 10) {
 					const p = params['P']?.[0];
 					const r = params['R']?.[0];
@@ -87,6 +109,8 @@
 			for (const m of mCodes) {
 				if (m === 3) setModal({ spindleOn: true });
 				else if (m === 5) setModal({ spindleOn: false });
+				else if (m === 7 || m === 8) setModal({ coolantOn: true });
+				else if (m === 9) setModal({ coolantOn: false });
 			}
 
 			if (params['F']) setModal({ feedrate: params['F'][0] });
@@ -102,9 +126,9 @@
 
 			if (modalState.motion === 'G2' || modalState.motion === 'G3') {
 				const target = { ...currentPosition };
-				if (x !== undefined) target.X = motionMode === 'absolute' ? x : currentPosition.X + x;
-				if (y !== undefined) target.Y = motionMode === 'absolute' ? y : currentPosition.Y + y;
-				if (z !== undefined) target.Z = motionMode === 'absolute' ? z : currentPosition.Z + z;
+				if (x !== undefined) target.X = modalState.motionMode === 'G90' ? x : currentPosition.X + x;
+				if (y !== undefined) target.Y = modalState.motionMode === 'G90' ? y : currentPosition.Y + y;
+				if (z !== undefined) target.Z = modalState.motionMode === 'G90' ? z : currentPosition.Z + z;
 
 				let axisA = 'X', axisB = 'Y', keyA = 'I', keyB = 'J';
 				if (modalState.plane === 'G18') { axisA = 'Z'; axisB = 'X'; keyA = 'K'; keyB = 'I'; }
@@ -201,9 +225,9 @@
 
 			} else {
 				const pos = { ...currentPosition };
-				if (x !== undefined) pos.X = motionMode === 'absolute' ? x : currentPosition.X + x;
-				if (y !== undefined) pos.Y = motionMode === 'absolute' ? y : currentPosition.Y + y;
-				if (z !== undefined) pos.Z = motionMode === 'absolute' ? z : currentPosition.Z + z;
+				if (x !== undefined) pos.X = modalState.motionMode === 'G90' ? x : currentPosition.X + x;
+				if (y !== undefined) pos.Y = modalState.motionMode === 'G90' ? y : currentPosition.Y + y;
+				if (z !== undefined) pos.Z = modalState.motionMode === 'G90' ? z : currentPosition.Z + z;
 
 				if (!Number.isNaN(pos.X) && !Number.isNaN(pos.Y) && !Number.isNaN(pos.Z)) {
 					const feedLength = Math.hypot(
