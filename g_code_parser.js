@@ -1,17 +1,23 @@
-	function parseGCode(gcode, segmentCount = 64) {
+	function parseGCode(gcode, segmentCount = 64, initialState = {}) {
 		const lines = gcode.split('\n');
 		const movements = [];
 
-		let currentPosition = { X: 0, Y: 0, Z: 0 };
-		let currentCommand = 'G0';
-		let centerMode = null;
-		let motionMode = 'absolute';
-		let plane = 'G17';
+		let currentPosition = {
+			X: initialState.X ?? 0,
+			Y: initialState.Y ?? 0,
+			Z: initialState.Z ?? 0,
+		};
+		let centerMode = initialState.centerMode ?? null;
+		let motionMode = initialState.motionMode ?? 'absolute';
 
 		let modalState = {
-			feedrate: null,
-			spindleSpeed: null,
-			spindleOn: false,
+			feedrate: initialState.feedrate ?? null,
+			spindleSpeed: initialState.spindleSpeed ?? null,
+			spindleOn: initialState.spindleOn ?? false,
+			motion: initialState.motion ?? 'G0',
+			plane: initialState.plane ?? 'G17',
+			units: initialState.units ?? 'mm',
+			tools: initialState.tools ?? {},
 		};
 
 		const stateCache = new Map();
@@ -37,7 +43,7 @@
 			movements.push({ command, X: x, Y: y, Z: z, lineNumber, feedLength, isMidpoint, state: modalState });
 		};
 
-		addMove(currentCommand, currentPosition.X, currentPosition.Y, currentPosition.Z, 0);
+		addMove(modalState.motion, currentPosition.X, currentPosition.Y, currentPosition.Z, 0);
 
 		for (let i = 0; i < lines.length; i++) {
 			let line = lines[i].toUpperCase().replace(/;.*$/, '').trim();
@@ -57,8 +63,17 @@
 				else if (g === 91.1) centerMode = 'relative';
 				else if (g === 90) motionMode = 'absolute';
 				else if (g === 91) motionMode = 'incremental';
-				else if ([0, 1, 2, 3].includes(g)) currentCommand = `G${g}`;
-				else if ([17, 18, 19].includes(g)) plane = `G${g}`;
+				else if (g === 20) setModal({ units: 'inch' });
+				else if (g === 21) setModal({ units: 'mm' });
+				else if (g === 10) {
+					const p = params['P']?.[0];
+					const r = params['R']?.[0];
+					if (p !== undefined && r !== undefined) {
+						setModal({ tools: { ...modalState.tools, [p]: { ...(modalState.tools[p] || {}), r } } });
+					}
+				}
+				else if ([0, 1, 2, 3, 4].includes(g)) setModal({ motion: `G${g}` });
+				else if ([17, 18, 19].includes(g)) setModal({ plane: `G${g}` });
 			}
 
 			const mCodes = params['M'] || [];
@@ -78,15 +93,15 @@
 			const kVal = params['K']?.[0] ?? 0;
 			const rVal = params['R']?.[0];
 
-			if (currentCommand === 'G2' || currentCommand === 'G3') {
+			if (modalState.motion === 'G2' || modalState.motion === 'G3') {
 				const target = { ...currentPosition };
 				if (x !== undefined) target.X = motionMode === 'absolute' ? x : currentPosition.X + x;
 				if (y !== undefined) target.Y = motionMode === 'absolute' ? y : currentPosition.Y + y;
 				if (z !== undefined) target.Z = motionMode === 'absolute' ? z : currentPosition.Z + z;
 
 				let axisA = 'X', axisB = 'Y', keyA = 'I', keyB = 'J';
-				if (plane === 'G18') { axisA = 'Z'; axisB = 'X'; keyA = 'K'; keyB = 'I'; }
-				else if (plane === 'G19') { axisA = 'Y'; axisB = 'Z'; keyA = 'J'; keyB = 'K'; }
+				if (modalState.plane === 'G18') { axisA = 'Z'; axisB = 'X'; keyA = 'K'; keyB = 'I'; }
+				else if (modalState.plane === 'G19') { axisA = 'Y'; axisB = 'Z'; keyA = 'J'; keyB = 'K'; }
 
 				const startA = currentPosition[axisA];
 				const startB = currentPosition[axisB];
@@ -100,7 +115,7 @@
 					const dy = endB - startB;
 					const chord2 = dx * dx + dy * dy;
 					const h = Math.sqrt(Math.max(0, rVal * rVal - chord2 / 4));
-					const dir = currentCommand === 'G2' ? -1 : 1;
+					const dir = modalState.motion === 'G2' ? -1 : 1;
 
 					const mx = (startA + endA) / 2;
 					const my = (startB + endB) / 2;
@@ -148,13 +163,13 @@
 				if (!isFullCircle) {
 
 					// if (isFullCircle) {
-						// sweep = currentCommand === 'G2' ? -2 * Math.PI : 2 * Math.PI;
+						// sweep = modalState.motion === 'G2' ? -2 * Math.PI : 2 * Math.PI;
 					// } else {
-						if (currentCommand === 'G2' && sweep > 0) sweep -= 2 * Math.PI;
-						if (currentCommand === 'G3' && sweep < 0) sweep += 2 * Math.PI;
+						if (modalState.motion === 'G2' && sweep > 0) sweep -= 2 * Math.PI;
+						if (modalState.motion === 'G3' && sweep < 0) sweep += 2 * Math.PI;
 					// }
 
-					const orthogonalAxis = (plane === 'G17') ? 'Z' : (plane === 'G18') ? 'Y' : 'X';
+					const orthogonalAxis = (modalState.plane === 'G17') ? 'Z' : (modalState.plane === 'G18') ? 'Y' : 'X';
 					const dOrthogonal = target[orthogonalAxis] - currentPosition[orthogonalAxis];
 					const arcLength = Math.hypot(radius * Math.abs(sweep), dOrthogonal);
 
@@ -169,7 +184,7 @@
 						point[orthogonalAxis] = currentPosition[orthogonalAxis] + ratio * dOrthogonal;
 
 						if (!Number.isNaN(point.X) && !Number.isNaN(point.Y) && !Number.isNaN(point.Z)) {
-							addMove(currentCommand, point.X, point.Y, point.Z, i, arcLength, j === midJ);
+							addMove(modalState.motion, point.X, point.Y, point.Z, i, arcLength, j === midJ);
 						}
 
 					}
@@ -190,7 +205,7 @@
 						pos.Z - currentPosition.Z
 					);
 					currentPosition = { ...pos };
-					addMove(currentCommand, pos.X, pos.Y, pos.Z, i, feedLength, true);
+					addMove(modalState.motion, pos.X, pos.Y, pos.Z, i, feedLength, true);
 				}
 			}
 		}

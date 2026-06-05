@@ -74,18 +74,18 @@ test('arc segments share a single feedLength value (full arc length)', () => {
 
 test('modal state objects are interned: identical states share a reference', () => {
 	const movements = parseGCode(sampleGcode);
-	// All moves between M03 (line 7) and M05 (line 17) with no S/F change in between
-	// should reference the same modal state object.
-	const onMoves = movements.filter(m =>
-		m.state.spindleOn === true &&
-		m.state.feedrate === 300.0 &&
-		m.state.spindleSpeed === 6000
-	);
-	assert.ok(onMoves.length > 1, 'should have multiple moves under spindle-on');
-	const ref = onMoves[0].state;
-	for (const m of onMoves) {
-		assert.strictEqual(m.state, ref, 'identical modal states must be the same reference');
+	const byKey = new Map();
+	let pairs = 0;
+	for (const m of movements) {
+		const key = JSON.stringify(m.state);
+		if (byKey.has(key)) {
+			assert.strictEqual(m.state, byKey.get(key), `state ${key} should share reference`);
+			pairs++;
+		} else {
+			byKey.set(key, m.state);
+		}
 	}
+	assert.ok(pairs > 0, 'sample should produce at least one pair of identical states for interning to verify');
 });
 
 test('every movement carries a state reference', () => {
@@ -115,6 +115,104 @@ test('state-only line (F/S/M3) emits one 0-length movement with post-line state'
 	assert.strictEqual(mv.state.feedrate, 300.0);
 	assert.strictEqual(mv.state.spindleSpeed, 6000);
 	assert.strictEqual(mv.state.spindleOn, true);
+});
+
+test('initial modal state defaults: motion=G0, plane=G17, units=mm, tools={}', () => {
+	const movements = parseGCode('');
+	assert.strictEqual(movements[0].state.motion, 'G0');
+	assert.strictEqual(movements[0].state.plane, 'G17');
+	assert.strictEqual(movements[0].state.units, 'mm');
+	assert.deepStrictEqual(movements[0].state.tools, {});
+});
+
+test('G10 P<n> R<r> sets tool radius in modal state', () => {
+	const movements = parseGCode(sampleGcode);
+	// Line 6 of sample (index 5): `G10P1R3.0`
+	const afterG10 = movements.find(m => m.lineNumber === 5);
+	assert.ok(afterG10, 'should emit a movement for the G10 line');
+	assert.deepStrictEqual(afterG10.state.tools, { 1: { r: 3.0 } });
+});
+
+test('multiple G10 entries accumulate tools without losing prior ones', () => {
+	const movements = parseGCode('G10P1R3.0\nG10P2R5.0\n');
+	const last = movements[movements.length - 1];
+	assert.deepStrictEqual(last.state.tools, { 1: { r: 3.0 }, 2: { r: 5.0 } });
+});
+
+test('initial state argument seeds position and modal state', () => {
+	const movements = parseGCode('X10Y10', 64, {
+		X: 5, Y: 5, Z: 2,
+		motion: 'G1',
+		feedrate: 100,
+		units: 'inch',
+		plane: 'G18',
+		spindleOn: true,
+		spindleSpeed: 8000,
+	});
+	// Seed move at the provided position with the provided modal state
+	assert.strictEqual(movements[0].X, 5);
+	assert.strictEqual(movements[0].Y, 5);
+	assert.strictEqual(movements[0].Z, 2);
+	assert.strictEqual(movements[0].state.motion, 'G1');
+	assert.strictEqual(movements[0].state.feedrate, 100);
+	assert.strictEqual(movements[0].state.units, 'inch');
+	assert.strictEqual(movements[0].state.plane, 'G18');
+	assert.strictEqual(movements[0].state.spindleOn, true);
+	assert.strictEqual(movements[0].state.spindleSpeed, 8000);
+
+	// X10Y10 under absolute mode lands at (10,10,2) and inherits motion=G1
+	const motionMove = movements[1];
+	assert.strictEqual(motionMove.X, 10);
+	assert.strictEqual(motionMove.Y, 10);
+	assert.strictEqual(motionMove.Z, 2);
+	assert.strictEqual(motionMove.state.motion, 'G1');
+});
+
+test('initial state partial overrides preserve other defaults', () => {
+	const movements = parseGCode('', 64, { feedrate: 500 });
+	assert.strictEqual(movements[0].state.feedrate, 500);
+	assert.strictEqual(movements[0].state.motion, 'G0');
+	assert.strictEqual(movements[0].state.units, 'mm');
+	assert.strictEqual(movements[0].state.plane, 'G17');
+	assert.strictEqual(movements[0].X, 0);
+});
+
+test('initial state with motionMode=incremental treats X/Y/Z as deltas', () => {
+	const movements = parseGCode('X3Y4', 64, {
+		X: 10, Y: 10, Z: 0,
+		motionMode: 'incremental',
+	});
+	const motionMove = movements[1];
+	assert.strictEqual(motionMove.X, 13);
+	assert.strictEqual(motionMove.Y, 14);
+});
+
+test('G21 sets units to mm; G20 sets units to inch', () => {
+	const mmMoves = parseGCode(sampleGcode);
+	// After G21 on file line 4 (lineNumber 3), every subsequent state has units=mm
+	const afterG21 = mmMoves.filter(m => m.lineNumber >= 3);
+	for (const m of afterG21) {
+		assert.strictEqual(m.state.units, 'mm');
+	}
+	const inchMoves = parseGCode('G20\nG01X10Y10\n');
+	const motionMove = inchMoves.find(m => m.lineNumber === 1);
+	assert.strictEqual(motionMove.state.units, 'inch');
+});
+
+test('arc-interpolated segments carry motion=G3 in modal state', () => {
+	const movements = parseGCode(sampleGcode);
+	const arcSegments = movements.filter(m => m.lineNumber === 12);
+	for (const seg of arcSegments) {
+		assert.strictEqual(seg.state.motion, 'G3');
+	}
+});
+
+test('motion mode is preserved across state-only lines', () => {
+	const movements = parseGCode(sampleGcode);
+	// Line 8 (`F300.0S6000M03`, lineNumber 7) is a state-only line emitted AFTER G00 on line 7.
+	// modalState.motion at that point should still be 'G0'.
+	const stateMv = movements.find(m => m.lineNumber === 7);
+	assert.strictEqual(stateMv.state.motion, 'G0', 'motion should remain G0 across F/S/M-only line');
 });
 
 test('M05 line emits a 0-length movement with spindle off and S latched', () => {

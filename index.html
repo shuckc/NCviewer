@@ -228,6 +228,34 @@
 	.viewer-info span.dro-gap {
 	  margin-top: 0.5rem;
 	}
+	.viewer-info.viewer-info-left {
+	  right: auto;
+	  left: 10px;
+	}
+
+	.tools-panel {
+	  margin-top: 10px;
+	  flex-shrink: 0;
+	  max-height: 30%;
+	  overflow-y: auto;
+	  font-size: 0.85rem;
+	  color: var(--text-editor);
+	  font-family: monospace;
+	}
+	.tools-panel table {
+	  width: 100%;
+	  border-collapse: collapse;
+	}
+	.tools-panel th, .tools-panel td {
+	  padding: 4px 8px;
+	  text-align: left;
+	  border-bottom: 1px solid var(--bg-resizer);
+	}
+	.tools-panel th {
+	  font-size: 0.75rem;
+	  text-transform: uppercase;
+	  opacity: 0.7;
+	}
 	
 	#viewer {
 		position: relative;
@@ -349,10 +377,21 @@
   </header>
   <main id="main">
     <div class="editor" id="editor">
-      <div id="codeEditor" style="width:100%; height:100%;"></div>
+      <div id="codeEditor" style="width:100%; flex: 1 1 auto; min-height: 0;"></div>
+      <div id="toolsPanel" class="tools-panel" style="display: none;">
+        <table>
+          <thead><tr><th>Tool</th><th>Radius</th><th>Length</th></tr></thead>
+          <tbody id="toolsTableBody"></tbody>
+        </table>
+      </div>
     </div>
     <div class="resizer" id="resizer"></div>
     <div class="viewer" id="viewer">
+      <div class="viewer-info viewer-info-left" id="viewerInfoLeft">
+        <span>Plane: <span id="planeText">G17 X-Y</span></span>
+        <span>Units: <span id="unitsText">mm</span></span>
+        <span>Motion: <span id="motionText">G0 rapid</span></span>
+      </div>
       <div class="viewer-info" id="viewerInfo">
         <span>X: <span id="posX">0.000</span></span>
         <span>Y: <span id="posY">0.000</span></span>
@@ -1051,6 +1090,35 @@ Enjoy!
 
 	let currentSelection = { startIdx: 0, endIdx: -1 };
 
+	const PLANE_LABELS = { 'G17': 'G17 X-Y', 'G18': 'G18 Z-X', 'G19': 'G19 Y-Z' };
+	const MOTION_LABELS = {
+		'G0': 'G0 rapid',
+		'G1': 'G1 linear',
+		'G2': 'G2 cw circular',
+		'G3': 'G3 ccw circular',
+		'G4': 'G4 dwell'
+	};
+
+	function updateToolsPanel(tools) {
+		const panel = document.getElementById('toolsPanel');
+		const tbody = document.getElementById('toolsTableBody');
+		const entries = Object.entries(tools || {});
+		if (entries.length === 0) {
+			panel.style.display = 'none';
+			tbody.innerHTML = '';
+			return;
+		}
+		panel.style.display = '';
+		tbody.innerHTML = '';
+		for (const [num, info] of entries) {
+			const tr = document.createElement('tr');
+			const radius = (info && info.r) ?? 0;
+			const length = (info && info.length) ?? 0;
+			tr.innerHTML = `<td>${num}</td><td>${radius.toFixed(3)}</td><td>${length.toFixed(3)}</td>`;
+			tbody.appendChild(tr);
+		}
+	}
+
 	function selectLineSegments(startIdx, endIdx) {
 		currentSelection = { startIdx, endIdx };
 		if (!lineSegmentsMesh) return;
@@ -1144,6 +1212,10 @@ Enjoy!
 			const mvState = movements[endIdx + 1].state;
 			document.getElementById('feedrate').textContent = mvState.feedrate ?? 0;
 			document.getElementById('spindle').textContent = mvState.spindleOn ? (mvState.spindleSpeed ?? 0) : 0;
+			document.getElementById('planeText').textContent = PLANE_LABELS[mvState.plane] ?? mvState.plane;
+			document.getElementById('unitsText').textContent = mvState.units;
+			document.getElementById('motionText').textContent = MOTION_LABELS[mvState.motion] ?? mvState.motion;
+			updateToolsPanel(mvState.tools);
 
 		} else {
 			startMarker.visible = false;
@@ -1156,6 +1228,10 @@ Enjoy!
 			document.getElementById('posA').textContent = (0).toFixed(3);
 			document.getElementById('feedrate').textContent = 0;
 			document.getElementById('spindle').textContent = 0;
+			document.getElementById('planeText').textContent = PLANE_LABELS['G17'];
+			document.getElementById('unitsText').textContent = 'mm';
+			document.getElementById('motionText').textContent = MOTION_LABELS['G0'];
+			updateToolsPanel({});
 		}
 	}
 		
