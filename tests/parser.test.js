@@ -139,6 +139,30 @@ test('multiple G10 entries accumulate tools without losing prior ones', () => {
 	assert.deepStrictEqual(last.state.tools, { 1: { r: 3.0 }, 2: { r: 5.0 } });
 });
 
+test('default radius comp state is G40 off, no tool', () => {
+	const movements = parseGCode('');
+	assert.strictEqual(movements[0].state.radiusComp, 'G40');
+	assert.strictEqual(movements[0].state.radiusCompTool, null);
+});
+
+test('G41 with D-word activates left comp and latches tool number', () => {
+	const movements = parseGCode(sampleGcode);
+	// File line 9 (`G17G41D01G00X8.0Y8.0`) → lineNumber 8
+	const mv = movements.find(m => m.lineNumber === 8);
+	assert.ok(mv, 'should emit a movement for the G41 line');
+	assert.strictEqual(mv.state.radiusComp, 'G41');
+	assert.strictEqual(mv.state.radiusCompTool, 1);
+});
+
+test('G40 cancels radius comp and clears D latch', () => {
+	const movements = parseGCode(sampleGcode);
+	// File line 17 (`G40G00X-8.0Y-8.0`) → lineNumber 16
+	const mv = movements.find(m => m.lineNumber === 16);
+	assert.ok(mv, 'should emit a movement for the G40 line');
+	assert.strictEqual(mv.state.radiusComp, 'G40');
+	assert.strictEqual(mv.state.radiusCompTool, null);
+});
+
 test('initial state argument seeds position and modal state', () => {
 	const movements = parseGCode('X10Y10', 64, {
 		X: 5, Y: 5, Z: 2,

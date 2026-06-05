@@ -391,6 +391,8 @@
         <span>Plane: <span id="planeText">G17 X-Y</span></span>
         <span>Units: <span id="unitsText">mm</span></span>
         <span>Motion: <span id="motionText">G0 rapid</span></span>
+        <span>Spindle: <span id="spindleStateText">Off</span></span>
+        <span>Radius comp: <span id="radiusCompText">G40 off</span></span>
       </div>
       <div class="viewer-info" id="viewerInfo">
         <span>X: <span id="posX">0.000</span></span>
@@ -1098,6 +1100,7 @@ Enjoy!
 		'G3': 'G3 ccw circular',
 		'G4': 'G4 dwell'
 	};
+	const RADIUS_COMP_LABELS = { 'G40': 'G40 off', 'G41': 'G41 left', 'G42': 'G42 right' };
 
 	function updateToolsPanel(tools) {
 		const panel = document.getElementById('toolsPanel');
@@ -1215,6 +1218,12 @@ Enjoy!
 			document.getElementById('planeText').textContent = PLANE_LABELS[mvState.plane] ?? mvState.plane;
 			document.getElementById('unitsText').textContent = mvState.units;
 			document.getElementById('motionText').textContent = MOTION_LABELS[mvState.motion] ?? mvState.motion;
+			document.getElementById('spindleStateText').textContent = mvState.spindleOn ? 'On' : 'Off';
+			const radiusLabel = RADIUS_COMP_LABELS[mvState.radiusComp] ?? mvState.radiusComp;
+			const dSuffix = mvState.radiusComp !== 'G40' && mvState.radiusCompTool != null
+				? ` D${mvState.radiusCompTool}`
+				: '';
+			document.getElementById('radiusCompText').textContent = radiusLabel + dSuffix;
 			updateToolsPanel(mvState.tools);
 
 		} else {
@@ -1231,6 +1240,8 @@ Enjoy!
 			document.getElementById('planeText').textContent = PLANE_LABELS['G17'];
 			document.getElementById('unitsText').textContent = 'mm';
 			document.getElementById('motionText').textContent = MOTION_LABELS['G0'];
+			document.getElementById('spindleStateText').textContent = 'Off';
+			document.getElementById('radiusCompText').textContent = RADIUS_COMP_LABELS['G40'];
 			updateToolsPanel({});
 		}
 	}

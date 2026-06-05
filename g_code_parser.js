@@ -18,6 +18,8 @@
 			plane: initialState.plane ?? 'G17',
 			units: initialState.units ?? 'mm',
 			tools: initialState.tools ?? {},
+			radiusComp: initialState.radiusComp ?? 'G40',
+			radiusCompTool: initialState.radiusCompTool ?? null,
 		};
 
 		const stateCache = new Map();
@@ -72,9 +74,14 @@
 						setModal({ tools: { ...modalState.tools, [p]: { ...(modalState.tools[p] || {}), r } } });
 					}
 				}
+				else if (g === 40) setModal({ radiusComp: 'G40', radiusCompTool: null });
+				else if (g === 41) setModal({ radiusComp: 'G41' });
+				else if (g === 42) setModal({ radiusComp: 'G42' });
 				else if ([0, 1, 2, 3, 4].includes(g)) setModal({ motion: `G${g}` });
 				else if ([17, 18, 19].includes(g)) setModal({ plane: `G${g}` });
 			}
+
+			if (params['D']) setModal({ radiusCompTool: params['D'][0] });
 
 			const mCodes = params['M'] || [];
 			for (const m of mCodes) {
