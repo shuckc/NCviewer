@@ -73,6 +73,34 @@
       cursor: pointer;
       font-size: 14px;
     }
+
+	.examples-dropdown {
+	  position: relative;
+	  display: inline-block;
+	}
+	.examples-menu {
+	  position: absolute;
+	  top: calc(100% + 4px);
+	  left: 0;
+	  background: var(--bg-header);
+	  color: var(--text-header);
+	  border: 1px solid var(--bg-resizer);
+	  list-style: none;
+	  margin: 0;
+	  padding: 4px 0;
+	  min-width: 200px;
+	  z-index: 10;
+	  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+	}
+	.examples-menu li {
+	  padding: 6px 12px;
+	  cursor: pointer;
+	  font-family: monospace;
+	  font-size: 13px;
+	}
+	.examples-menu li:hover {
+	  background: var(--btn-bg);
+	}
 	
 	.right svg {
 	  max-height: 40px; 
@@ -326,6 +354,10 @@
 <body class="light">
   <header>
     <div class="left">
+      <div class="examples-dropdown">
+        <button id="examplesBtn">Examples ▾</button>
+        <ul id="examplesMenu" class="examples-menu" hidden></ul>
+      </div>
       <button id="loadBtn">Load File</button>
 	  <button id="reprocessBtn">Reprocess File</button>
 	  <button id="newBtn">New File</button>
@@ -760,6 +792,47 @@ Enjoy!
 	}
 
 	loadBtn.addEventListener('click', () => fileInput.click());
+
+	const EXAMPLE_FILES = [
+		"example-doc-part.gcode",
+		"drill-hole.gcode",
+		"mdx-drill-2.gcode",
+		"NCViewerLogo.gcode"
+	];
+
+	const examplesBtn = document.getElementById('examplesBtn');
+	const examplesMenu = document.getElementById('examplesMenu');
+
+	EXAMPLE_FILES.forEach(name => {
+		const li = document.createElement('li');
+		li.textContent = name;
+		li.addEventListener('click', () => loadExample(name));
+		examplesMenu.appendChild(li);
+	});
+
+	examplesBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		examplesMenu.hidden = !examplesMenu.hidden;
+	});
+
+	document.addEventListener('click', (e) => {
+		if (!e.target.closest('.examples-dropdown')) examplesMenu.hidden = true;
+	});
+
+	async function loadExample(name) {
+		examplesMenu.hidden = true;
+		try {
+			const response = await fetch(`samples/${name}`);
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			const text = await response.text();
+			loadedFilename = name;
+			monacoEditor.setValue(text);
+			processGCodeFromEditor();
+		} catch (err) {
+			console.error('Failed to load example:', err);
+			alert(`Failed to load ${name}: ${err.message}`);
+		}
+	}
 
 	fileInput.addEventListener('change', (e) => {
 	const file = e.target.files[0];
