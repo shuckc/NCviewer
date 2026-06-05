@@ -1301,6 +1301,11 @@ Enjoy!
 		afterSelColor: 0xA6A6A6,
 	};
 
+	const toggleTheme = document.getElementById('toggleTheme');
+	const savedTheme = localStorage.getItem('theme');
+	const isLight = savedTheme ? savedTheme === 'light' : toggleTheme.checked;
+	updateColorsForTheme(!isLight);
+
 	const markerMaterial = new THREE.SpriteMaterial({
 		color: colors.selectedColor,
 		transparent: true,
@@ -1362,8 +1367,6 @@ Enjoy!
 		}
 	}
 
-	const toggleTheme = document.getElementById('toggleTheme');
-
 	function applyTheme(isLight) {
 		toggleTheme.checked = isLight;
 		document.body.classList.toggle('dark', !isLight);
@@ -1395,9 +1398,6 @@ Enjoy!
 
 		addGridLines(getNonEmptySegmentBox());
 	}
-
-	const savedTheme = localStorage.getItem('theme');
-	const isLight = savedTheme ? savedTheme === 'light' : toggleTheme.checked;
 
 	applyTheme(isLight);
 
