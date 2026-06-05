@@ -16,6 +16,26 @@ test('seed movement: starts at origin with G0', () => {
 	assert.strictEqual(movements[0].X, 0);
 	assert.strictEqual(movements[0].Y, 0);
 	assert.strictEqual(movements[0].Z, 0);
+	assert.strictEqual(movements[0].A, 0);
+});
+
+test('A-axis: motion line with A-word records A on the movement', () => {
+	const movements = parseGCode('G90\nG01 X10 Y20 A45\n');
+	const last = movements[movements.length - 1];
+	assert.strictEqual(last.X, 10);
+	assert.strictEqual(last.Y, 20);
+	assert.strictEqual(last.A, 45);
+});
+
+test('A-axis: incremental A adds to current A', () => {
+	const movements = parseGCode('G91\nA10\nA10\n', 64, { A: 5 });
+	const last = movements[movements.length - 1];
+	assert.strictEqual(last.A, 25);
+});
+
+test('A-axis: initial position A from initialState is preserved', () => {
+	const movements = parseGCode('', 64, { A: 12.5 });
+	assert.strictEqual(movements[0].A, 12.5);
 });
 
 test('G91 incremental motion mode is honoured', () => {

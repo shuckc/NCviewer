@@ -1218,7 +1218,7 @@ Enjoy!
 
 			const sliderValue = parseFloat(slider.value);
 			const totalLength = cumulativeLengths[cumulativeLengths.length - 1] || 0;
-			let toolX, toolY, toolZ;
+			let toolX, toolY, toolZ, toolA;
 
 			if (cumulativeLengths.length >= 2 && sliderValue > 0 && sliderValue <= totalLength) {
 				const segIdx = sliderValueToSegmentIndex(sliderValue);
@@ -1231,19 +1231,21 @@ Enjoy!
 				toolX = a.X + (b.X - a.X) * t;
 				toolY = a.Y + (b.Y - a.Y) * t;
 				toolZ = a.Z + (b.Z - a.Z) * t;
+				toolA = (a.A ?? 0) + ((b.A ?? 0) - (a.A ?? 0)) * t;
 				toolheadGroup.position.set(toolX, toolY, toolZ);
 				toolheadGroup.visible = true;
 			} else {
 				toolX = endPos.x;
 				toolY = endPos.y;
 				toolZ = endPos.z;
+				toolA = movements[endIdx + 1].A ?? 0;
 				toolheadGroup.visible = false;
 			}
 
 			document.getElementById('posX').textContent = toolX.toFixed(3);
 			document.getElementById('posY').textContent = toolY.toFixed(3);
 			document.getElementById('posZ').textContent = toolZ.toFixed(3);
-			document.getElementById('posA').textContent = (0).toFixed(3);
+			document.getElementById('posA').textContent = toolA.toFixed(3);
 			const mvState = movements[endIdx + 1].state;
 			document.getElementById('feedrate').textContent = mvState.feedrate ?? 0;
 			document.getElementById('spindle').textContent = mvState.spindleOn ? (mvState.spindleSpeed ?? 0) : 0;

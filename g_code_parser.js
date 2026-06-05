@@ -6,6 +6,7 @@
 			X: initialState.X ?? 0,
 			Y: initialState.Y ?? 0,
 			Z: initialState.Z ?? 0,
+			A: initialState.A ?? 0,
 		};
 		let centerMode = initialState.centerMode ?? null;
 
@@ -44,11 +45,11 @@
 		const FULL_CIRCLE_TOLERANCE = 1e-6;
 		const firstArcDetected = { used: false };
 
-		const addMove = (command, x, y, z, lineNumber, feedLength = 0, isMidpoint = false) => {
-			movements.push({ command, X: x, Y: y, Z: z, lineNumber, feedLength, isMidpoint, state: modalState });
+		const addMove = (command, x, y, z, a, lineNumber, feedLength = 0, isMidpoint = false) => {
+			movements.push({ command, X: x, Y: y, Z: z, A: a, lineNumber, feedLength, isMidpoint, state: modalState });
 		};
 
-		addMove(modalState.motion, currentPosition.X, currentPosition.Y, currentPosition.Z, 0);
+		addMove(modalState.motion, currentPosition.X, currentPosition.Y, currentPosition.Z, currentPosition.A, 0);
 
 		for (let i = 0; i < lines.length; i++) {
 			let line = lines[i].toUpperCase().replace(/;.*$/, '').trim();
@@ -119,6 +120,7 @@
 			const x = params['X']?.[0];
 			const y = params['Y']?.[0];
 			const z = params['Z']?.[0];
+			const a = params['A']?.[0];
 			const iVal = params['I']?.[0] ?? 0;
 			const jVal = params['J']?.[0] ?? 0;
 			const kVal = params['K']?.[0] ?? 0;
@@ -129,6 +131,7 @@
 				if (x !== undefined) target.X = modalState.motionMode === 'G90' ? x : currentPosition.X + x;
 				if (y !== undefined) target.Y = modalState.motionMode === 'G90' ? y : currentPosition.Y + y;
 				if (z !== undefined) target.Z = modalState.motionMode === 'G90' ? z : currentPosition.Z + z;
+				if (a !== undefined) target.A = modalState.motionMode === 'G90' ? a : currentPosition.A + a;
 
 				let axisA = 'X', axisB = 'Y', keyA = 'I', keyB = 'J';
 				if (modalState.plane === 'G18') { axisA = 'Z'; axisB = 'X'; keyA = 'K'; keyB = 'I'; }
@@ -202,6 +205,7 @@
 
 					const orthogonalAxis = (modalState.plane === 'G17') ? 'Z' : (modalState.plane === 'G18') ? 'Y' : 'X';
 					const dOrthogonal = target[orthogonalAxis] - currentPosition[orthogonalAxis];
+					const dA = target.A - currentPosition.A;
 					const arcLength = Math.hypot(radius * Math.abs(sweep), dOrthogonal);
 
 					const midJ = Math.ceil(segmentCount / 2);
@@ -213,9 +217,10 @@
 						point[axisA] = centerA + radius * Math.cos(angle);
 						point[axisB] = centerB + radius * Math.sin(angle);
 						point[orthogonalAxis] = currentPosition[orthogonalAxis] + ratio * dOrthogonal;
+						point.A = currentPosition.A + ratio * dA;
 
 						if (!Number.isNaN(point.X) && !Number.isNaN(point.Y) && !Number.isNaN(point.Z)) {
-							addMove(modalState.motion, point.X, point.Y, point.Z, i, arcLength, j === midJ);
+							addMove(modalState.motion, point.X, point.Y, point.Z, point.A, i, arcLength, j === midJ);
 						}
 
 					}
@@ -228,6 +233,7 @@
 				if (x !== undefined) pos.X = modalState.motionMode === 'G90' ? x : currentPosition.X + x;
 				if (y !== undefined) pos.Y = modalState.motionMode === 'G90' ? y : currentPosition.Y + y;
 				if (z !== undefined) pos.Z = modalState.motionMode === 'G90' ? z : currentPosition.Z + z;
+				if (a !== undefined) pos.A = modalState.motionMode === 'G90' ? a : currentPosition.A + a;
 
 				if (!Number.isNaN(pos.X) && !Number.isNaN(pos.Y) && !Number.isNaN(pos.Z)) {
 					const feedLength = Math.hypot(
@@ -236,7 +242,7 @@
 						pos.Z - currentPosition.Z
 					);
 					currentPosition = { ...pos };
-					addMove(modalState.motion, pos.X, pos.Y, pos.Z, i, feedLength, true);
+					addMove(modalState.motion, pos.X, pos.Y, pos.Z, pos.A, i, feedLength, true);
 				}
 			}
 		}
