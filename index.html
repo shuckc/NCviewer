@@ -899,6 +899,8 @@ Enjoy!
 		const marginFactor = 0.2;
 		const min = box.min;
 		const max = box.max;
+		const coneSize = box.getSize(new THREE.Vector3()).length() * 0.0168;
+		const up = new THREE.Vector3(0, 1, 0);
 
 		const axes = [
 			{
@@ -927,16 +929,20 @@ Enjoy!
 
 			let from = new THREE.Vector3();
 			let to = new THREE.Vector3();
+			let axisDir = new THREE.Vector3();
 
 			if (dir === 'x') {
 				from.set(start - margin, 0, 0);
 				to.set(end + margin, 0, 0);
+				axisDir.set(1, 0, 0);
 			} else if (dir === 'y') {
 				from.set(0, start - margin, 0);
 				to.set(0, end + margin, 0);
+				axisDir.set(0, 1, 0);
 			} else if (dir === 'z') {
 				from.set(0, 0, start - margin);
 				to.set(0, 0, end + margin);
+				axisDir.set(0, 0, 1);
 			}
 
 			const material = new THREE.LineBasicMaterial({
@@ -951,6 +957,24 @@ Enjoy!
 			line.userData.isAxisLine = true;
 
 			scene.add(line);
+
+			const coneGeometry = new THREE.ConeGeometry(coneSize * 0.4, coneSize, 8);
+			coneGeometry.translate(0, -coneSize / 2, 0);
+
+			const coneMaterial = new THREE.MeshBasicMaterial({
+				color,
+				depthTest: false,
+				transparent: true,
+				opacity: 0.8
+			});
+
+			const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+			cone.position.copy(to);
+			cone.quaternion.setFromUnitVectors(up, axisDir);
+			cone.renderOrder = 1;
+			cone.userData.isAxisLine = true;
+
+			scene.add(cone);
 		});
 	}
 
