@@ -598,7 +598,7 @@
 		camera.zoom = 1;
 		camera.updateProjectionMatrix();
 
-		camera.position.set(center.x + size * 1.1, center.y + size * -1.1, size * 1.1);
+		camera.position.set(center.x + size * 1.5, center.y - size * 1.5, size * 0.7);
 		camera.lookAt(center);
 
 		controls.target.copy(center);
