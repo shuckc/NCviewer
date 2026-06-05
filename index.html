@@ -469,23 +469,10 @@
 				const lineIdx = movement.lineNumber;
 
 				highlightEditorLine(lineIdx);
-				slider.value = segmentIndex;
-				// selectLineSegments(segmentIndex, segmentIndex);
+				slider.value = segmentIndexToSliderValue(segmentIndex);
 
-				let startIdx = -1;
-				let endIdx = -1;
-
-				for (let i = 1; i < movements.length; i++) {
-					if (movements[i].lineNumber === lineIdx) {
-						const segmentIdx = i - 1;
-						if (startIdx === -1) startIdx = segmentIdx;
-						endIdx = segmentIdx;
-					}
-				}
-
-				if (startIdx !== -1 && endIdx !== -1) {
-					selectLineSegments(startIdx, endIdx);
-				}
+				const { startIdx, endIdx } = expandToLineNumberRange(segmentIndex);
+				selectLineSegments(startIdx, endIdx);
 				
 			} else {
 				slider.value = 0;
@@ -603,18 +590,49 @@ Enjoy!
 			}
 
 			if (startIdx !== -1 && endIdx !== -1) {
-				slider.value = endIdx;
+				slider.value = segmentIndexToSliderValue(endIdx);
 				selectLineSegments(startIdx, endIdx);
 			}
 		});
 	});
 
 	let movements = [];
+	let cumulativeLengths = [];
 	let lineSegmentsMesh = null;
 	let arrowMesh = null;
 	let arrowSegmentIndices = [];
 	let arrowLength = 0;
 	let loadedFilename = "gcode.txt";
+
+	function segmentIndexToSliderValue(idx) {
+		return cumulativeLengths[idx + 1] ?? 0;
+	}
+
+	function sliderValueToSegmentIndex(value) {
+		if (cumulativeLengths.length < 2) return 0;
+		let lo = 1, hi = cumulativeLengths.length - 1;
+		while (lo < hi) {
+			const mid = (lo + hi) >>> 1;
+			if (cumulativeLengths[mid] < value) lo = mid + 1; else hi = mid;
+		}
+		return Math.max(0, Math.min(movements.length - 2, lo - 1));
+	}
+
+	function expandToLineNumberRange(segIdx) {
+		if (segIdx + 1 >= movements.length) return { startIdx: segIdx, endIdx: segIdx };
+		const lineIdx = movements[segIdx + 1].lineNumber;
+		let startIdx = -1;
+		let endIdx = -1;
+		for (let i = 1; i < movements.length; i++) {
+			if (movements[i].lineNumber === lineIdx) {
+				const sIdx = i - 1;
+				if (startIdx === -1) startIdx = sIdx;
+				endIdx = sIdx;
+			}
+		}
+		if (startIdx === -1) return { startIdx: segIdx, endIdx: segIdx };
+		return { startIdx, endIdx };
+	}
 
 	function segmentHasArrow(mv) {
 		if (mv.command === 'G0') return false;
@@ -714,6 +732,9 @@ Enjoy!
 		const colorFeed = new THREE.Color(colors.feedColor);
 		const colorRapid = new THREE.Color(colors.rapidColor);
 
+		cumulativeLengths = new Array(movements.length);
+		cumulativeLengths[0] = 0;
+
 		for (let i = 1; i < movements.length; i++) {
 			const start = new THREE.Vector3(movements[i - 1].X, movements[i - 1].Y, movements[i - 1].Z);
 			const end = new THREE.Vector3(movements[i].X, movements[i].Y, movements[i].Z);
@@ -722,6 +743,8 @@ Enjoy!
 
 			positions.push(start.x, start.y, start.z, end.x, end.y, end.z);
 			colorsArray.push(color.r, color.g, color.b, color.r, color.g, color.b);
+
+			cumulativeLengths[i] = cumulativeLengths[i - 1] + start.distanceTo(end);
 		}
 
 		const geometry = new THREE.BufferGeometry();
@@ -733,10 +756,13 @@ Enjoy!
 		segmentsGroup.add(lineSegmentsMesh);
 
 		arrowLength = getNonEmptySegmentBox().getSize(new THREE.Vector3()).length() * 0.0084;
+		const toolheadScale = arrowLength * 2;
+		toolheadGroup.scale.set(toolheadScale, toolheadScale, toolheadScale);
 		buildArrowheads();
 
 		slider.value = 0;
-		slider.max = movements.length - 1;
+		slider.max = cumulativeLengths[cumulativeLengths.length - 1] || 0;
+		slider.step = 'any';
 		selectLineSegments(movements.length, movements.length);
 		resetCamera();
 	}
@@ -890,15 +916,14 @@ Enjoy!
 	const slider = document.getElementById('viewerSlider');
 	
 	slider.addEventListener('input', (event) => {
-		const value = parseInt(event.target.value, 10);
+		const value = parseFloat(event.target.value);
+		const segmentIndex = sliderValueToSegmentIndex(value);
 
-		if (value >= 0 && value < movements.length - 1) {
-			const startIdx = value;
-			const endIdx = value;
-
+		if (segmentIndex >= 0 && segmentIndex < movements.length - 1) {
+			const { startIdx, endIdx } = expandToLineNumberRange(segmentIndex);
 			selectLineSegments(startIdx, endIdx);
 
-			const lineNumber = movements[startIdx + 1].lineNumber;
+			const lineNumber = movements[segmentIndex + 1].lineNumber;
 			highlightEditorLine(lineNumber);
 		}
 	});
@@ -1018,7 +1043,10 @@ Enjoy!
     });
   }
 
+	let currentSelection = { startIdx: 0, endIdx: -1 };
+
 	function selectLineSegments(startIdx, endIdx) {
+		currentSelection = { startIdx, endIdx };
 		if (!lineSegmentsMesh) return;
 
 		const colorAttr = lineSegmentsMesh.geometry.attributes.color;
@@ -1078,15 +1106,40 @@ Enjoy!
 
 			startMarker.visible = true;
 			endMarker.visible = true;
-			
-			document.getElementById('posX').textContent = movements[endIdx + 1].X.toFixed(3);
-			document.getElementById('posY').textContent = movements[endIdx + 1].Y.toFixed(3);
-			document.getElementById('posZ').textContent = movements[endIdx + 1].Z.toFixed(3);
-			
+
+			const sliderValue = parseFloat(slider.value);
+			const totalLength = cumulativeLengths[cumulativeLengths.length - 1] || 0;
+			let toolX, toolY, toolZ;
+
+			if (cumulativeLengths.length >= 2 && sliderValue > 0 && sliderValue <= totalLength) {
+				const segIdx = sliderValueToSegmentIndex(sliderValue);
+				const segStart = cumulativeLengths[segIdx];
+				const segEnd = cumulativeLengths[segIdx + 1];
+				const segLen = segEnd - segStart;
+				const t = segLen > 0 ? (sliderValue - segStart) / segLen : 0;
+				const a = movements[segIdx];
+				const b = movements[segIdx + 1];
+				toolX = a.X + (b.X - a.X) * t;
+				toolY = a.Y + (b.Y - a.Y) * t;
+				toolZ = a.Z + (b.Z - a.Z) * t;
+				toolheadGroup.position.set(toolX, toolY, toolZ);
+				toolheadGroup.visible = true;
+			} else {
+				toolX = endPos.x;
+				toolY = endPos.y;
+				toolZ = endPos.z;
+				toolheadGroup.visible = false;
+			}
+
+			document.getElementById('posX').textContent = toolX.toFixed(3);
+			document.getElementById('posY').textContent = toolY.toFixed(3);
+			document.getElementById('posZ').textContent = toolZ.toFixed(3);
+
 		} else {
 			startMarker.visible = false;
 			endMarker.visible = false;
-			
+			toolheadGroup.visible = false;
+
 			document.getElementById('posX').textContent = 0.000;
 			document.getElementById('posY').textContent = 0.000;
 			document.getElementById('posZ').textContent = 0.000;
@@ -1121,6 +1174,37 @@ Enjoy!
 	scene.add(endMarker);
 	startMarker.visible = false;
 	endMarker.visible = false;
+
+	const toolheadGroup = new THREE.Group();
+	const toolheadConeGeom = new THREE.ConeGeometry(0.4, 1, 8);
+	toolheadConeGeom.translate(0, -0.5, 0);
+	toolheadConeGeom.rotateX(-Math.PI / 2);
+	const toolheadConeMat = new THREE.MeshBasicMaterial({
+		color: 0xFFA500,
+		depthTest: false,
+		transparent: true,
+		opacity: 1.0
+	});
+	const toolheadCone = new THREE.Mesh(toolheadConeGeom, toolheadConeMat);
+	toolheadCone.renderOrder = 2;
+
+	const toolheadTailGeom = new THREE.BufferGeometry().setFromPoints([
+		new THREE.Vector3(0, 0, 1),
+		new THREE.Vector3(0, 0, 3)
+	]);
+	const toolheadTailMat = new THREE.LineBasicMaterial({
+		color: 0xFFA500,
+		depthTest: false,
+		transparent: true,
+		opacity: 1.0
+	});
+	const toolheadTail = new THREE.Line(toolheadTailGeom, toolheadTailMat);
+	toolheadTail.renderOrder = 2;
+
+	toolheadGroup.add(toolheadCone);
+	toolheadGroup.add(toolheadTail);
+	toolheadGroup.visible = false;
+	scene.add(toolheadGroup);
 
 	function updateColorsForTheme(isLight) {
 		if (isLight) {
@@ -1181,7 +1265,7 @@ Enjoy!
 		const isLight = this.checked;
 		localStorage.setItem('theme', isLight ? 'light' : 'dark');
 		applyTheme(isLight);
-		selectLineSegments(movements.length, movements.length);
+		selectLineSegments(currentSelection.startIdx, currentSelection.endIdx);
 	});
 	
 	function animate() {
