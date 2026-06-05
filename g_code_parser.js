@@ -13,8 +13,8 @@
 		const FULL_CIRCLE_TOLERANCE = 1e-6;
 		const firstArcDetected = { used: false };
 
-		const addMove = (command, x, y, z, feedrate, lineNumber, feedLength = 0, isArcMidpoint = false) => {
-			movements.push({ command, X: x, Y: y, Z: z, feedrate, lineNumber, feedLength, isArcMidpoint });
+		const addMove = (command, x, y, z, feedrate, lineNumber, feedLength = 0, isMidpoint = false) => {
+			movements.push({ command, X: x, Y: y, Z: z, feedrate, lineNumber, feedLength, isMidpoint });
 		};
 
 		addMove(currentCommand, currentPosition.X, currentPosition.Y, currentPosition.Z, currentFeedrate, 0);
@@ -144,6 +144,7 @@
 						if (!Number.isNaN(point.X) && !Number.isNaN(point.Y) && !Number.isNaN(point.Z)) {
 							addMove(currentCommand, point.X, point.Y, point.Z, currentFeedrate, i, arcLength, j === midJ);
 						}
+
 					}
 
 					currentPosition = { ...target };
@@ -162,7 +163,7 @@
 						pos.Z - currentPosition.Z
 					);
 					currentPosition = { ...pos };
-					addMove(currentCommand, pos.X, pos.Y, pos.Z, currentFeedrate, i, feedLength);
+					addMove(currentCommand, pos.X, pos.Y, pos.Z, currentFeedrate, i, feedLength, true);
 				}
 			}
 		}

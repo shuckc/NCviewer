@@ -618,19 +618,25 @@ Enjoy!
 
 	function segmentHasArrow(mv) {
 		if (mv.command === 'G0') return false;
-		if ((mv.command === 'G2' || mv.command === 'G3') && !mv.isArcMidpoint) return false;
-		return true;
+		return mv.isMidpoint;
 	}
 
 	function buildArrowheads() {
 		arrowSegmentIndices = [];
 		const entries = [];
+		const minConeSpacing = arrowLength * 30;
+		let cumulativeSinceLastCone = minConeSpacing;
+
 		for (let i = 1; i < movements.length; i++) {
 			const mv = movements[i];
-			if (!segmentHasArrow(mv)) continue;
-			if (mv.feedLength <= arrowLength) continue;
 
-			const start = new THREE.Vector3(movements[i - 1].X, movements[i - 1].Y, movements[i - 1].Z);
+			if (mv.isMidpoint) cumulativeSinceLastCone += mv.feedLength;
+
+			if (!segmentHasArrow(mv)) continue;
+			if (cumulativeSinceLastCone < minConeSpacing) continue;
+
+			const prev = movements[i - 1];
+			const start = new THREE.Vector3(prev.X, prev.Y, prev.Z);
 			const end = new THREE.Vector3(mv.X, mv.Y, mv.Z);
 			const delta = new THREE.Vector3().subVectors(end, start);
 			const segmentLength = delta.length();
@@ -640,6 +646,8 @@ Enjoy!
 			const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
 			entries.push({ midpoint, direction });
 			arrowSegmentIndices.push(i - 1);
+
+			cumulativeSinceLastCone = 0;
 		}
 
 		if (entries.length === 0) return;
