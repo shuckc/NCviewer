@@ -38,6 +38,45 @@ test('A-axis: initial position A from initialState is preserved', () => {
 	assert.strictEqual(movements[0].A, 12.5);
 });
 
+test('G28: emits two rapids on the same lineNumber and lands at (0,0,0,0)', () => {
+	// Start at (10, 20, 30, 0); G28 Z5 → rapid to (10, 20, 5, 0), then rapid to (0, 0, 0, 0)
+	const movements = parseGCode('G90\nG28 Z5\n', 64, { X: 10, Y: 20, Z: 30 });
+	const g28Line = movements.filter(m => m.lineNumber === 1);
+	assert.strictEqual(g28Line.length, 2, 'G28 should emit two movements');
+	// First rapid: to intermediate
+	assert.strictEqual(g28Line[0].command, 'G0');
+	assert.strictEqual(g28Line[0].X, 10);
+	assert.strictEqual(g28Line[0].Y, 20);
+	assert.strictEqual(g28Line[0].Z, 5);
+	// Second rapid: to home
+	assert.strictEqual(g28Line[1].command, 'G0');
+	assert.strictEqual(g28Line[1].X, 0);
+	assert.strictEqual(g28Line[1].Y, 0);
+	assert.strictEqual(g28Line[1].Z, 0);
+	assert.strictEqual(g28Line[1].A, 0);
+});
+
+test('G28 under G91 (incremental): intermediate computed relative to current', () => {
+	// Start at (10, 20, 30), G91, G28 Z0 → intermediate Z = 30 + 0 = 30, then home
+	const movements = parseGCode('G91\nG28 Z0\n', 64, { X: 10, Y: 20, Z: 30 });
+	const g28Line = movements.filter(m => m.lineNumber === 1);
+	assert.strictEqual(g28Line.length, 2);
+	assert.strictEqual(g28Line[0].Z, 30, 'incremental Z0 keeps Z unchanged');
+	assert.strictEqual(g28Line[1].X, 0);
+	assert.strictEqual(g28Line[1].Z, 0);
+});
+
+test('G28 with no axes: collapses to a single rapid to home (first rapid is zero-length)', () => {
+	const movements = parseGCode('G90\nG28\n', 64, { X: 5, Y: 5, Z: 5 });
+	const g28Line = movements.filter(m => m.lineNumber === 1);
+	assert.strictEqual(g28Line.length, 2);
+	// Intermediate = current position (no axes given) → first rapid has zero feedLength
+	assert.strictEqual(g28Line[0].X, 5);
+	assert.strictEqual(g28Line[0].feedLength, 0);
+	// Second rapid goes home
+	assert.strictEqual(g28Line[1].X, 0);
+});
+
 test('G91 incremental motion mode is honoured', () => {
 	const movements = parseGCode(sampleGcode);
 	// First G00Z5.0 (line index 6) under G91 should set Z to +5.0 from origin

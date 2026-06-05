@@ -63,6 +63,8 @@
 				params[letter].push(parseFloat(value));
 			}
 
+			let motionEmittedOnLine = false;
+
 			const gCodes = params['G'] || [];
 			for (const g of gCodes) {
 				if (g === 90.1) centerMode = 'absolute';
@@ -85,6 +87,35 @@
 					if (gz !== undefined) next.Z = currentPosition.Z - gz;
 					if (ga !== undefined) next.A = -ga;
 					setModal({ wcs: { ...modalState.wcs, [active]: next } });
+					delete params['X'];
+					delete params['Y'];
+					delete params['Z'];
+					delete params['A'];
+				}
+				else if (g === 28) {
+					const intermediate = { ...currentPosition };
+					const gx = params['X']?.[0];
+					const gy = params['Y']?.[0];
+					const gz = params['Z']?.[0];
+					const ga = params['A']?.[0];
+					if (gx !== undefined) intermediate.X = modalState.motionMode === 'G90' ? gx : currentPosition.X + gx;
+					if (gy !== undefined) intermediate.Y = modalState.motionMode === 'G90' ? gy : currentPosition.Y + gy;
+					if (gz !== undefined) intermediate.Z = modalState.motionMode === 'G90' ? gz : currentPosition.Z + gz;
+					if (ga !== undefined) intermediate.A = modalState.motionMode === 'G90' ? ga : currentPosition.A + ga;
+
+					const len1 = Math.hypot(
+						intermediate.X - currentPosition.X,
+						intermediate.Y - currentPosition.Y,
+						intermediate.Z - currentPosition.Z
+					);
+					addMove('G0', intermediate.X, intermediate.Y, intermediate.Z, intermediate.A, i, len1, true);
+
+					const len2 = Math.hypot(intermediate.X, intermediate.Y, intermediate.Z);
+					addMove('G0', 0, 0, 0, 0, i, len2, true);
+
+					currentPosition = { X: 0, Y: 0, Z: 0, A: 0 };
+					motionEmittedOnLine = true;
+
 					delete params['X'];
 					delete params['Y'];
 					delete params['Z'];
@@ -126,7 +157,9 @@
 			const kVal = params['K']?.[0] ?? 0;
 			const rVal = params['R']?.[0];
 
-			if (modalState.motion === 'G2' || modalState.motion === 'G3') {
+			if (motionEmittedOnLine) {
+				// G28 (or future canned-cycle expansion) already emitted moves for this line
+			} else if (modalState.motion === 'G2' || modalState.motion === 'G3') {
 				const target = { ...currentPosition };
 				if (x !== undefined) target.X = modalState.motionMode === 'G90' ? x : currentPosition.X + x;
 				if (y !== undefined) target.Y = modalState.motionMode === 'G90' ? y : currentPosition.Y + y;
