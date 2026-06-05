@@ -13,8 +13,8 @@
 		const FULL_CIRCLE_TOLERANCE = 1e-6;
 		const firstArcDetected = { used: false };
 
-		const addMove = (command, x, y, z, feedrate, lineNumber, isArcSegment = false, isArcMidpoint = false) => {
-			movements.push({ command, X: x, Y: y, Z: z, feedrate, lineNumber, isArcSegment, isArcMidpoint });
+		const addMove = (command, x, y, z, feedrate, lineNumber, feedLength = 0, isArcMidpoint = false) => {
+			movements.push({ command, X: x, Y: y, Z: z, feedrate, lineNumber, feedLength, isArcMidpoint });
 		};
 
 		addMove(currentCommand, currentPosition.X, currentPosition.Y, currentPosition.Z, currentFeedrate, 0);
@@ -129,6 +129,7 @@
 
 					const orthogonalAxis = (plane === 'G17') ? 'Z' : (plane === 'G18') ? 'Y' : 'X';
 					const dOrthogonal = target[orthogonalAxis] - currentPosition[orthogonalAxis];
+					const arcLength = Math.hypot(radius * Math.abs(sweep), dOrthogonal);
 
 					const midJ = Math.ceil(segmentCount / 2);
 					for (let j = 1; j <= segmentCount; j++) {
@@ -141,7 +142,7 @@
 						point[orthogonalAxis] = currentPosition[orthogonalAxis] + ratio * dOrthogonal;
 
 						if (!Number.isNaN(point.X) && !Number.isNaN(point.Y) && !Number.isNaN(point.Z)) {
-							addMove('G1', point.X, point.Y, point.Z, currentFeedrate, i, true, j === midJ);
+							addMove(currentCommand, point.X, point.Y, point.Z, currentFeedrate, i, arcLength, j === midJ);
 						}
 					}
 
@@ -155,8 +156,13 @@
 				if (z !== undefined) pos.Z = motionMode === 'absolute' ? z : currentPosition.Z + z;
 
 				if (!Number.isNaN(pos.X) && !Number.isNaN(pos.Y) && !Number.isNaN(pos.Z)) {
+					const feedLength = Math.hypot(
+						pos.X - currentPosition.X,
+						pos.Y - currentPosition.Y,
+						pos.Z - currentPosition.Z
+					);
 					currentPosition = { ...pos };
-					addMove(currentCommand, pos.X, pos.Y, pos.Z, currentFeedrate, i);
+					addMove(currentCommand, pos.X, pos.Y, pos.Z, currentFeedrate, i, feedLength);
 				}
 			}
 		}

@@ -618,43 +618,23 @@ Enjoy!
 
 	function segmentHasArrow(mv) {
 		if (mv.command === 'G0') return false;
-		if (mv.isArcSegment && !mv.isArcMidpoint) return false;
+		if ((mv.command === 'G2' || mv.command === 'G3') && !mv.isArcMidpoint) return false;
 		return true;
 	}
 
 	function buildArrowheads() {
 		arrowSegmentIndices = [];
-
-		const arcLengthAtIndex = new Array(movements.length).fill(0);
-		let k = 1;
-		while (k < movements.length) {
-			if (!movements[k].isArcSegment) { k++; continue; }
-			const arcLine = movements[k].lineNumber;
-			let j = k;
-			let total = 0;
-			while (j < movements.length && movements[j].isArcSegment && movements[j].lineNumber === arcLine) {
-				const dx = movements[j].X - movements[j - 1].X;
-				const dy = movements[j].Y - movements[j - 1].Y;
-				const dz = movements[j].Z - movements[j - 1].Z;
-				total += Math.hypot(dx, dy, dz);
-				j++;
-			}
-			for (let m = k; m < j; m++) arcLengthAtIndex[m] = total;
-			k = j;
-		}
-
 		const entries = [];
 		for (let i = 1; i < movements.length; i++) {
 			const mv = movements[i];
 			if (!segmentHasArrow(mv)) continue;
+			if (mv.feedLength <= arrowLength) continue;
 
 			const start = new THREE.Vector3(movements[i - 1].X, movements[i - 1].Y, movements[i - 1].Z);
 			const end = new THREE.Vector3(mv.X, mv.Y, mv.Z);
 			const delta = new THREE.Vector3().subVectors(end, start);
 			const segmentLength = delta.length();
-
-			const spanLength = mv.isArcSegment ? arcLengthAtIndex[i] : segmentLength;
-			if (spanLength <= arrowLength) continue;
+			if (segmentLength === 0) continue;
 
 			const direction = delta.divideScalar(segmentLength);
 			const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
