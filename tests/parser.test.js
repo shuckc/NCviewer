@@ -66,6 +66,171 @@ test('G28 under G91 (incremental): intermediate computed relative to current', (
 	assert.strictEqual(g28Line[1].Z, 0);
 });
 
+test('default canned-cycle state: cycleMotion=G80, returnLevel=G98, R/Z/P/Q=null', () => {
+	const movements = parseGCode('');
+	assert.strictEqual(movements[0].state.cycleMotion, 'G80');
+	assert.strictEqual(movements[0].state.returnLevel, 'G98');
+	assert.strictEqual(movements[0].state.cycleR, null);
+	assert.strictEqual(movements[0].state.cycleZ, null);
+	assert.strictEqual(movements[0].state.cycleP, null);
+	assert.strictEqual(movements[0].state.cycleQ, null);
+});
+
+test('G81 with R and Z sets cycleMotion and latches both', () => {
+	const movements = parseGCode('G98 G81 X-1.6990 R0.1190 Z0.0390\n');
+	const mv = movements[movements.length - 1];
+	assert.strictEqual(mv.state.cycleMotion, 'G81');
+	assert.strictEqual(mv.state.cycleR, 0.119);
+	assert.strictEqual(mv.state.cycleZ, 0.039);
+	assert.strictEqual(mv.state.returnLevel, 'G98');
+});
+
+test('G99 sets returnLevel to G99', () => {
+	const movements = parseGCode('G99 G81 X1 R0.5 Z-1\n');
+	const mv = movements[movements.length - 1];
+	assert.strictEqual(mv.state.returnLevel, 'G99');
+});
+
+test('G80 cancels cycle but leaves R/Z latched', () => {
+	const movements = parseGCode('G81 X1 R0.5 Z-1\nG80\n');
+	const mv = movements[movements.length - 1];
+	assert.strictEqual(mv.state.cycleMotion, 'G80');
+	assert.strictEqual(mv.state.cycleR, 0.5);
+	assert.strictEqual(mv.state.cycleZ, -1);
+});
+
+test('G81 expansion: 4 sub-moves under G98 (rapid over, rapid to R, feed to Z, retract to initialZ)', () => {
+	// Leading blank line shifts the cycle to lineNumber=1, avoiding seed-move collision.
+	const movements = parseGCode('\nG98 G81 X5 R1 Z-2\n');
+	const subMoves = movements.filter(m => m.lineNumber === 1);
+	assert.strictEqual(subMoves.length, 4, 'G81 + G98 should emit 4 sub-moves');
+	// 1: rapid to (5, 0, initialZ=0)
+	assert.strictEqual(subMoves[0].command, 'G0');
+	assert.deepStrictEqual([subMoves[0].X, subMoves[0].Y, subMoves[0].Z], [5, 0, 0]);
+	// 2: rapid to (5, 0, R=1)
+	assert.strictEqual(subMoves[1].command, 'G0');
+	assert.deepStrictEqual([subMoves[1].X, subMoves[1].Y, subMoves[1].Z], [5, 0, 1]);
+	// 3: feed to (5, 0, Z=-2)
+	assert.strictEqual(subMoves[2].command, 'G1');
+	assert.deepStrictEqual([subMoves[2].X, subMoves[2].Y, subMoves[2].Z], [5, 0, -2]);
+	// 4: retract to (5, 0, initialZ=0) under G98
+	assert.strictEqual(subMoves[3].command, 'G0');
+	assert.deepStrictEqual([subMoves[3].X, subMoves[3].Y, subMoves[3].Z], [5, 0, 0]);
+});
+
+test('G81 expansion: G99 retracts to R instead of initialZ', () => {
+	const movements = parseGCode('\nG99 G81 X5 R1 Z-2\n');
+	const subMoves = movements.filter(m => m.lineNumber === 1);
+	assert.strictEqual(subMoves[subMoves.length - 1].Z, 1, 'G99 retracts to R=1');
+});
+
+test('G81 latches across X-only follow-up line: second cycle at new X reuses R/Z', () => {
+	const movements = parseGCode('\nG98 G81 X5 R1 Z-2\nX10\n');
+	const second = movements.filter(m => m.lineNumber === 2);
+	// Second cycle: 4 sub-moves at X=10 using latched R=1, Z=-2
+	assert.strictEqual(second.length, 4);
+	assert.strictEqual(second[0].X, 10);
+	assert.strictEqual(second[1].Z, 1);    // rapid to R
+	assert.strictEqual(second[2].Z, -2);   // feed to Z
+	assert.strictEqual(second[2].command, 'G1');
+});
+
+test('G80 cancels: subsequent X-only line is a plain straight move, not a cycle', () => {
+	const movements = parseGCode('\nG98 G81 X5 R1 Z-2\nG80\nG1 X10\n');
+	const lineMoves = movements.filter(m => m.lineNumber === 3);
+	// Should be exactly one move (the G1 X10), not a cycle expansion
+	assert.strictEqual(lineMoves.length, 1);
+	assert.strictEqual(lineMoves[0].command, 'G1');
+	assert.strictEqual(lineMoves[0].X, 10);
+});
+
+test('G82 expansion: an extra 0-length move appears at the bottom for the dwell', () => {
+	const movements = parseGCode('\nG98 G82 X5 R1 Z-2 P250\n');
+	const subMoves = movements.filter(m => m.lineNumber === 1);
+	// rapid over, rapid to R, feed to Z, dwell (0-length), retract
+	assert.strictEqual(subMoves.length, 5);
+	const dwell = subMoves[3];
+	assert.strictEqual(dwell.feedLength, 0);
+	assert.strictEqual(dwell.Z, -2);
+	assert.strictEqual(dwell.state.cycleP, 250);
+});
+
+test('G83 peck: drilling depth 4, Q=1 produces 4 feed steps and 3 retract-and-resume pairs', () => {
+	const movements = parseGCode('\nG98 G83 X5 R0 Z-4 Q1\n');
+	const subMoves = movements.filter(m => m.lineNumber === 1);
+	// Envelope: rapid over + rapid to R (2 moves)
+	// Pecks: each non-final peck is feed + rapid-up + rapid-down (3 moves); final peck is feed only (1 move)
+	// Final retract: 1 move
+	// With Q=1, depth=4 → 4 pecks (3 with retract+resume, 1 final feed) = 3*3 + 1 = 10 peck moves
+	// Total: 2 + 10 + 1 = 13
+	assert.strictEqual(subMoves.length, 13);
+	// Confirm 4 feed (G1) moves
+	const feeds = subMoves.filter(m => m.command === 'G1');
+	assert.strictEqual(feeds.length, 4);
+	// Final feed must reach Z=-4
+	assert.strictEqual(feeds[feeds.length - 1].Z, -4);
+});
+
+test('G83 with no X/Y on its own line fires the cycle at current X/Y', () => {
+	// mdx-drill-2.gcode pattern: peck drill at the current position
+	const movements = parseGCode('\nG00 X1 Y2\nG00 Z0\nG83 Z-0.8 R0 Q0.1\n');
+	const cycleMoves = movements.filter(m => m.lineNumber === 3);
+	assert.ok(cycleMoves.length > 1, 'cycle should expand to multiple sub-moves on the G83 line');
+	// All sub-moves at the current X/Y (1, 2) — the cycle didn't move us laterally
+	for (const m of cycleMoves) {
+		assert.strictEqual(m.X, 1);
+		assert.strictEqual(m.Y, 2);
+	}
+	// Default G98 → final move returns to initialZ = 0
+	assert.strictEqual(cycleMoves[cycleMoves.length - 1].Z, 0);
+});
+
+test('mdx-drill-2.gcode sample: G83 at current position returns to initial Z under default G98', () => {
+	const sample = fs.readFileSync(
+		path.join(__dirname, '..', 'samples', 'mdx-drill-2.gcode'),
+		'utf8'
+	);
+	const movements = parseGCode(sample);
+	// File line 7 (`G83 Z-0.800 R0.0 F3.0 Q0.100`) → lineNumber 6
+	const drillMoves = movements.filter(m => m.lineNumber === 6);
+	assert.ok(drillMoves.length > 1, 'G83 line should expand into peck sub-moves');
+	// Last sub-move retracts to initialZ = 0 (Z was 0 before the cycle, no explicit G99)
+	assert.strictEqual(drillMoves[drillMoves.length - 1].Z, 0);
+	// Cycle drilled at X=0, Y=0 (current position when G83 fired)
+	for (const m of drillMoves) {
+		assert.strictEqual(m.X, 0);
+		assert.strictEqual(m.Y, 0);
+	}
+});
+
+test('drill-hole.gcode sample renders without throwing and produces G81 sub-moves on line 9', () => {
+	const sample = fs.readFileSync(
+		path.join(__dirname, '..', 'samples', 'drill-hole.gcode'),
+		'utf8'
+	);
+	const movements = parseGCode(sample);
+	const drillLine = movements.filter(m => m.lineNumber === 9);
+	// G98 G81 X-1.6990 R0.1190 Z0.0390 → 4 sub-moves
+	assert.strictEqual(drillLine.length, 4);
+	// Last sub-move (retract under G98) returns to initialZ (which is 0 at that point)
+	assert.strictEqual(drillLine[3].Z, 0);
+	assert.strictEqual(drillLine[3].X, -1.699);
+});
+
+test('G82 with P captures dwell time', () => {
+	const movements = parseGCode('G82 X1 R0.5 Z-1 P250\n');
+	const mv = movements[movements.length - 1];
+	assert.strictEqual(mv.state.cycleMotion, 'G82');
+	assert.strictEqual(mv.state.cycleP, 250);
+});
+
+test('G83 with Q captures peck depth', () => {
+	const movements = parseGCode('G83 X1 R0.5 Z-5 Q1\n');
+	const mv = movements[movements.length - 1];
+	assert.strictEqual(mv.state.cycleMotion, 'G83');
+	assert.strictEqual(mv.state.cycleQ, 1);
+});
+
 test('G28 with no axes: collapses to a single rapid to home (first rapid is zero-length)', () => {
 	const movements = parseGCode('G90\nG28\n', 64, { X: 5, Y: 5, Z: 5 });
 	const g28Line = movements.filter(m => m.lineNumber === 1);

@@ -24,6 +24,12 @@
 			tools: initialState.tools ?? {},
 			radiusComp: initialState.radiusComp ?? 'G40',
 			radiusCompTool: initialState.radiusCompTool ?? null,
+			cycleMotion: initialState.cycleMotion ?? 'G80',
+			returnLevel: initialState.returnLevel ?? 'G98',
+			cycleR: initialState.cycleR ?? null,
+			cycleZ: initialState.cycleZ ?? null,
+			cycleP: initialState.cycleP ?? null,
+			cycleQ: initialState.cycleQ ?? null,
 		};
 
 		const stateCache = new Map();
@@ -49,6 +55,66 @@
 			movements.push({ command, X: x, Y: y, Z: z, A: a, lineNumber, feedLength, isMidpoint, state: modalState });
 		};
 
+		let cycleInitialZ = null;
+
+		const emitCannedCycle = (x, y, lineNumber) => {
+			const r = modalState.cycleR;
+			const z = modalState.cycleZ;
+			const initialZ = cycleInitialZ;
+			if (r == null || z == null || initialZ == null) return;
+
+			const a = currentPosition.A;
+
+			// 1. Rapid to (X, Y, initialZ) — position over the hole at safe height
+			let len = Math.hypot(x - currentPosition.X, y - currentPosition.Y, initialZ - currentPosition.Z);
+			addMove('G0', x, y, initialZ, a, lineNumber, len, true);
+			currentPosition = { X: x, Y: y, Z: initialZ, A: a };
+
+			// 2. Rapid to (X, Y, R) — descend to retract level
+			len = Math.abs(r - initialZ);
+			addMove('G0', x, y, r, a, lineNumber, len, true);
+			currentPosition = { X: x, Y: y, Z: r, A: a };
+
+			// 3. Cycle-specific drilling step
+			if (modalState.cycleMotion === 'G81') {
+				const feedLen = Math.abs(z - r);
+				addMove('G1', x, y, z, a, lineNumber, feedLen, true);
+				currentPosition = { X: x, Y: y, Z: z, A: a };
+			} else if (modalState.cycleMotion === 'G82') {
+				const feedLen = Math.abs(z - r);
+				addMove('G1', x, y, z, a, lineNumber, feedLen, true);
+				currentPosition = { X: x, Y: y, Z: z, A: a };
+				// Dwell: emit a 0-length move at the bottom. dwellMs not tracked in state separately
+				// — cycleP on the move's state already exposes it.
+				addMove('G1', x, y, z, a, lineNumber, 0, true);
+			} else if (modalState.cycleMotion === 'G83') {
+				const q = Math.abs(modalState.cycleQ ?? (r - z));
+				const direction = z < r ? -1 : 1;
+				const clearance = Math.abs(r - z) * 0.01;
+				let lastBottom = r;
+				while ((direction < 0 && lastBottom > z) || (direction > 0 && lastBottom < z)) {
+					const peckZ = direction < 0 ? Math.max(lastBottom + direction * q, z) : Math.min(lastBottom + direction * q, z);
+					addMove('G1', x, y, peckZ, a, lineNumber, Math.abs(currentPosition.Z - peckZ), true);
+					currentPosition = { X: x, Y: y, Z: peckZ, A: a };
+					lastBottom = peckZ;
+					if (peckZ === z) break;
+					addMove('G0', x, y, r, a, lineNumber, Math.abs(peckZ - r), true);
+					currentPosition = { X: x, Y: y, Z: r, A: a };
+					const resumeZ = peckZ - direction * clearance;
+					addMove('G0', x, y, resumeZ, a, lineNumber, Math.abs(r - resumeZ), true);
+					currentPosition = { X: x, Y: y, Z: resumeZ, A: a };
+				}
+			}
+
+			// 4. Retract: G99 → R level, G98 → initial Z
+			const retractZ = modalState.returnLevel === 'G99' ? r : initialZ;
+			const retractLen = Math.abs(currentPosition.Z - retractZ);
+			if (retractLen > 0) {
+				addMove('G0', x, y, retractZ, a, lineNumber, retractLen, true);
+				currentPosition = { X: x, Y: y, Z: retractZ, A: a };
+			}
+		};
+
 		addMove(modalState.motion, currentPosition.X, currentPosition.Y, currentPosition.Z, currentPosition.A, 0);
 
 		for (let i = 0; i < lines.length; i++) {
@@ -64,6 +130,7 @@
 			}
 
 			let motionEmittedOnLine = false;
+			let cycleStartedOnLine = false;
 
 			const gCodes = params['G'] || [];
 			for (const g of gCodes) {
@@ -131,8 +198,51 @@
 				else if (g === 40) setModal({ radiusComp: 'G40', radiusCompTool: null });
 				else if (g === 41) setModal({ radiusComp: 'G41' });
 				else if (g === 42) setModal({ radiusComp: 'G42' });
+				else if (g === 80) {
+					setModal({ cycleMotion: 'G80' });
+					cycleInitialZ = null;
+				}
+				else if ([81, 82, 83].includes(g)) {
+					const wasOff = modalState.cycleMotion === 'G80';
+					setModal({ cycleMotion: `G${g}` });
+					if (params['R'] !== undefined) setModal({ cycleR: params['R'][0] });
+					if (params['Z'] !== undefined) setModal({ cycleZ: params['Z'][0] });
+					if (g === 82 && params['P'] !== undefined) setModal({ cycleP: params['P'][0] });
+					if (g === 83 && params['Q'] !== undefined) setModal({ cycleQ: params['Q'][0] });
+					if (wasOff) cycleInitialZ = currentPosition.Z;
+					cycleStartedOnLine = true;
+				}
+				else if (g === 98) setModal({ returnLevel: 'G98' });
+				else if (g === 99) setModal({ returnLevel: 'G99' });
 				else if ([0, 1, 2, 3, 4].includes(g)) setModal({ motion: `G${g}` });
 				else if ([17, 18, 19].includes(g)) setModal({ plane: `G${g}` });
+			}
+
+			// Cycle-active line: emit the canned-cycle sub-moves at the line's X/Y, or at current X/Y
+			// if the cycle was just commanded on this line (G81/G82/G83 fires once even without X/Y).
+			const cycleHasXY = params['X'] !== undefined || params['Y'] !== undefined;
+			if (modalState.cycleMotion !== 'G80' && (cycleHasXY || cycleStartedOnLine)) {
+				// Re-latch R/Z/P/Q if specified on this (follow-up) line
+				if (params['R'] !== undefined) setModal({ cycleR: params['R'][0] });
+				if (params['Z'] !== undefined) setModal({ cycleZ: params['Z'][0] });
+				if (modalState.cycleMotion === 'G82' && params['P'] !== undefined) setModal({ cycleP: params['P'][0] });
+				if (modalState.cycleMotion === 'G83' && params['Q'] !== undefined) setModal({ cycleQ: params['Q'][0] });
+
+				const cx = params['X']?.[0];
+				const cy = params['Y']?.[0];
+				const targetX = cx !== undefined
+					? (modalState.motionMode === 'G90' ? cx : currentPosition.X + cx)
+					: currentPosition.X;
+				const targetY = cy !== undefined
+					? (modalState.motionMode === 'G90' ? cy : currentPosition.Y + cy)
+					: currentPosition.Y;
+
+				emitCannedCycle(targetX, targetY, i);
+				motionEmittedOnLine = true;
+
+				delete params['X'];
+				delete params['Y'];
+				delete params['Z'];
 			}
 
 			if (params['D']) setModal({ radiusCompTool: params['D'][0] });

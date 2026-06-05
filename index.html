@@ -399,6 +399,8 @@
         <span>WCS: <span id="wcsText">G54</span></span>
         <span>Units: <span id="unitsText">mm</span></span>
         <span>Motion: <span id="motionText">G0 rapid</span></span>
+        <span>Cycle: <span id="cycleMotionText">G80 off</span></span>
+        <span>Return: <span id="returnLevelText">G98 initial</span></span>
         <span>Spindle: <span id="spindleStateText">Off</span></span>
         <span>Coolant: <span id="coolantText">Off</span></span>
         <span>Radius comp: <span id="radiusCompText">G40 off</span></span>
@@ -1111,6 +1113,13 @@ Enjoy!
 	};
 	const RADIUS_COMP_LABELS = { 'G40': 'G40 off', 'G41': 'G41 left', 'G42': 'G42 right' };
 	const MOTION_MODE_LABELS = { 'G90': 'G90 absolute', 'G91': 'G91 incremental' };
+	const CYCLE_MOTION_LABELS = {
+		'G80': 'G80 off',
+		'G81': 'G81 drill',
+		'G82': 'G82 drill+dwell',
+		'G83': 'G83 peck',
+	};
+	const RETURN_LEVEL_LABELS = { 'G98': 'G98 initial', 'G99': 'G99 R-level' };
 
 	function updateWcsPanel(wcsMap) {
 		const panel = document.getElementById('wcsPanel');
@@ -1254,6 +1263,8 @@ Enjoy!
 			document.getElementById('motionText').textContent = MOTION_LABELS[mvState.motion] ?? mvState.motion;
 			document.getElementById('motionModeText').textContent = MOTION_MODE_LABELS[mvState.motionMode] ?? mvState.motionMode;
 			document.getElementById('wcsText').textContent = mvState.activeWcs;
+			document.getElementById('cycleMotionText').textContent = CYCLE_MOTION_LABELS[mvState.cycleMotion] ?? mvState.cycleMotion;
+			document.getElementById('returnLevelText').textContent = RETURN_LEVEL_LABELS[mvState.returnLevel] ?? mvState.returnLevel;
 			document.getElementById('spindleStateText').textContent = mvState.spindleOn ? 'On' : 'Off';
 			document.getElementById('coolantText').textContent = mvState.coolantOn ? 'On' : 'Off';
 			const radiusLabel = RADIUS_COMP_LABELS[mvState.radiusComp] ?? mvState.radiusComp;
@@ -1280,6 +1291,8 @@ Enjoy!
 			document.getElementById('motionText').textContent = MOTION_LABELS['G0'];
 			document.getElementById('motionModeText').textContent = MOTION_MODE_LABELS['G90'];
 			document.getElementById('wcsText').textContent = 'G54';
+			document.getElementById('cycleMotionText').textContent = CYCLE_MOTION_LABELS['G80'];
+			document.getElementById('returnLevelText').textContent = RETURN_LEVEL_LABELS['G98'];
 			document.getElementById('spindleStateText').textContent = 'Off';
 			document.getElementById('coolantText').textContent = 'Off';
 			document.getElementById('radiusCompText').textContent = RADIUS_COMP_LABELS['G40'];
