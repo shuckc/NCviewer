@@ -225,6 +225,9 @@
 	.viewer-info span {
 	  margin-bottom: 4px;
 	}
+	.viewer-info span.dro-gap {
+	  margin-top: 0.5rem;
+	}
 	
 	#viewer {
 		position: relative;
@@ -354,6 +357,9 @@
         <span>X: <span id="posX">0.000</span></span>
         <span>Y: <span id="posY">0.000</span></span>
         <span>Z: <span id="posZ">0.000</span></span>
+        <span>A: <span id="posA">0.000</span></span>
+        <span class="dro-gap">F: <span id="feedrate">0</span></span>
+        <span>S: <span id="spindle">0</span></span>
       </div>
       <input type="range" id="viewerSlider" min="0" max="100" value="0" step="1" />
     </div>
@@ -1134,15 +1140,22 @@ Enjoy!
 			document.getElementById('posX').textContent = toolX.toFixed(3);
 			document.getElementById('posY').textContent = toolY.toFixed(3);
 			document.getElementById('posZ').textContent = toolZ.toFixed(3);
+			document.getElementById('posA').textContent = (0).toFixed(3);
+			const mvState = movements[endIdx + 1].state;
+			document.getElementById('feedrate').textContent = mvState.feedrate ?? 0;
+			document.getElementById('spindle').textContent = mvState.spindleOn ? (mvState.spindleSpeed ?? 0) : 0;
 
 		} else {
 			startMarker.visible = false;
 			endMarker.visible = false;
 			toolheadGroup.visible = false;
 
-			document.getElementById('posX').textContent = 0.000;
-			document.getElementById('posY').textContent = 0.000;
-			document.getElementById('posZ').textContent = 0.000;
+			document.getElementById('posX').textContent = (0).toFixed(3);
+			document.getElementById('posY').textContent = (0).toFixed(3);
+			document.getElementById('posZ').textContent = (0).toFixed(3);
+			document.getElementById('posA').textContent = (0).toFixed(3);
+			document.getElementById('feedrate').textContent = 0;
+			document.getElementById('spindle').textContent = 0;
 		}
 	}
 		

@@ -4,20 +4,40 @@
 
 		let currentPosition = { X: 0, Y: 0, Z: 0 };
 		let currentCommand = 'G0';
-		let currentFeedrate = null;
 		let centerMode = null;
 		let motionMode = 'absolute';
 		let plane = 'G17';
+
+		let modalState = {
+			feedrate: null,
+			spindleSpeed: null,
+			spindleOn: false,
+		};
+
+		const stateCache = new Map();
+		stateCache.set(JSON.stringify(modalState), modalState);
+
+		const setModal = (patch) => {
+			const next = { ...modalState, ...patch };
+			const key = JSON.stringify(next);
+			const existing = stateCache.get(key);
+			if (existing) {
+				modalState = existing;
+			} else {
+				stateCache.set(key, next);
+				modalState = next;
+			}
+		};
 
 		const ARC_CENTER_TOLERANCE = 0.001;
 		const FULL_CIRCLE_TOLERANCE = 1e-6;
 		const firstArcDetected = { used: false };
 
-		const addMove = (command, x, y, z, feedrate, lineNumber, feedLength = 0, isMidpoint = false) => {
-			movements.push({ command, X: x, Y: y, Z: z, feedrate, lineNumber, feedLength, isMidpoint });
+		const addMove = (command, x, y, z, lineNumber, feedLength = 0, isMidpoint = false) => {
+			movements.push({ command, X: x, Y: y, Z: z, lineNumber, feedLength, isMidpoint, state: modalState });
 		};
 
-		addMove(currentCommand, currentPosition.X, currentPosition.Y, currentPosition.Z, currentFeedrate, 0);
+		addMove(currentCommand, currentPosition.X, currentPosition.Y, currentPosition.Z, 0);
 
 		for (let i = 0; i < lines.length; i++) {
 			let line = lines[i].toUpperCase().replace(/;.*$/, '').trim();
@@ -41,7 +61,14 @@
 				else if ([17, 18, 19].includes(g)) plane = `G${g}`;
 			}
 
-			if (params['F']) currentFeedrate = params['F'][0];
+			const mCodes = params['M'] || [];
+			for (const m of mCodes) {
+				if (m === 3) setModal({ spindleOn: true });
+				else if (m === 5) setModal({ spindleOn: false });
+			}
+
+			if (params['F']) setModal({ feedrate: params['F'][0] });
+			if (params['S']) setModal({ spindleSpeed: params['S'][0] });
 
 			const x = params['X']?.[0];
 			const y = params['Y']?.[0];
@@ -142,7 +169,7 @@
 						point[orthogonalAxis] = currentPosition[orthogonalAxis] + ratio * dOrthogonal;
 
 						if (!Number.isNaN(point.X) && !Number.isNaN(point.Y) && !Number.isNaN(point.Z)) {
-							addMove(currentCommand, point.X, point.Y, point.Z, currentFeedrate, i, arcLength, j === midJ);
+							addMove(currentCommand, point.X, point.Y, point.Z, i, arcLength, j === midJ);
 						}
 
 					}
@@ -150,7 +177,7 @@
 					currentPosition = { ...target };
 				}
 
-			} else if (x !== undefined || y !== undefined || z !== undefined || gCodes.length > 0) {
+			} else {
 				const pos = { ...currentPosition };
 				if (x !== undefined) pos.X = motionMode === 'absolute' ? x : currentPosition.X + x;
 				if (y !== undefined) pos.Y = motionMode === 'absolute' ? y : currentPosition.Y + y;
@@ -163,10 +190,14 @@
 						pos.Z - currentPosition.Z
 					);
 					currentPosition = { ...pos };
-					addMove(currentCommand, pos.X, pos.Y, pos.Z, currentFeedrate, i, feedLength, true);
+					addMove(currentCommand, pos.X, pos.Y, pos.Z, i, feedLength, true);
 				}
 			}
 		}
 
 		return movements;
+	}
+
+	if (typeof module !== 'undefined' && module.exports) {
+		module.exports = { parseGCode };
 	}
