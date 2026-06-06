@@ -5,7 +5,7 @@ const path = require('node:path');
 const { parseGCode } = require('../g_code_parser.js');
 
 const sampleGcode = fs.readFileSync(
-	path.join(__dirname, '..', 'samples', 'example-doc-part.gcode'),
+	path.join(__dirname, 'fixtures', 'example-doc-part.gcode'),
 	'utf8'
 );
 
@@ -187,7 +187,7 @@ test('G83 with no X/Y on its own line fires the cycle at current X/Y', () => {
 
 test('mdx-drill-2.gcode sample: G83 at current position returns to initial Z under default G98', () => {
 	const sample = fs.readFileSync(
-		path.join(__dirname, '..', 'samples', 'mdx-drill-2.gcode'),
+		path.join(__dirname, 'fixtures', 'mdx-drill-2.gcode'),
 		'utf8'
 	);
 	const movements = parseGCode(sample);
@@ -205,7 +205,7 @@ test('mdx-drill-2.gcode sample: G83 at current position returns to initial Z und
 
 test('drill-hole.gcode sample renders without throwing and produces G81 sub-moves on line 9', () => {
 	const sample = fs.readFileSync(
-		path.join(__dirname, '..', 'samples', 'drill-hole.gcode'),
+		path.join(__dirname, 'fixtures', 'drill-hole.gcode'),
 		'utf8'
 	);
 	const movements = parseGCode(sample);
