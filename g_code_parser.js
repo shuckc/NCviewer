@@ -1,6 +1,10 @@
 	function parseGCode(gcode, segmentCount = 64, initialState = {}) {
 		const lines = gcode.split('\n');
 		const movements = [];
+		const compensated = [];
+		let compActive = false;
+		let prevCompDir = null;
+		let lastXyPointIdx = -1;
 
 		let currentPosition = {
 			X: initialState.X ?? 0,
@@ -51,8 +55,132 @@
 		const FULL_CIRCLE_TOLERANCE = 1e-6;
 		const firstArcDetected = { used: false };
 
+		// Pushes the programmed movement and, when cutter compensation is active, also emits
+		// the tool-center polyline into compensated[]. Each movement records compIdx (start
+		// of its half-open slice in compensated[]); the slice end is movements[i+1].compIdx.
+		// Lead-in/lead-out points are written with byte-exact coords of an adjacent programmed
+		// position so the renderer can detect the comp-on/off boundary via equality.
 		const addMove = (command, x, y, z, a, lineNumber, feedLength = 0, isMidpoint = false) => {
-			movements.push({ command, X: x, Y: y, Z: z, A: a, lineNumber, feedLength, isMidpoint, state: modalState });
+			const idx = movements.length;
+			const compIdx = compensated.length;
+			movements.push({ command, X: x, Y: y, Z: z, A: a, lineNumber, feedLength, isMidpoint, state: modalState, compIdx });
+
+			// Seed entry at parser init — no predecessor, nothing to compensate.
+			if (idx === 0) return;
+
+			const prev = movements[idx - 1];
+			const isCompOn = modalState.radiusComp === 'G41' || modalState.radiusComp === 'G42';
+			const tool = isCompOn && modalState.radiusCompTool != null ? modalState.tools[modalState.radiusCompTool] : null;
+			const r = tool && tool.r ? tool.r : 0;
+
+			if (isCompOn && r > 0) {
+				const dx = x - prev.X;
+				const dy = y - prev.Y;
+				const len = Math.hypot(dx, dy);
+				const side = modalState.radiusComp === 'G41' ? 1 : -1;
+
+				if (len > 0) {
+					const ux = dx / len;
+					const uy = dy / len;
+					// perp = direction rotated 90°; sign flips for G42 (right-side offset).
+					const perpX = -uy * side;
+					const perpY = ux * side;
+					const offEndX = x + perpX * r;
+					const offEndY = y + perpY * r;
+
+					if (!compActive) {
+						// Lead-in: comp just activated on this move. Emit 2 points — the start
+						// coords copy prev exactly so the renderer detects the boundary via ===.
+						compensated.push({ X: prev.X, Y: prev.Y, Z: prev.Z, movement_i: idx });
+						compensated.push({ X: offEndX, Y: offEndY, Z: z, movement_i: idx });
+					} else {
+						// Sustained: intersect the previous offset line with this one to find
+						// the sharp-corner crossover, then mutate the anchor in place.
+						const anchor = compensated[lastXyPointIdx];
+						const offStartX = prev.X + perpX * r;
+						const offStartY = prev.Y + perpY * r;
+						const Pdx = prevCompDir.x, Pdy = prevCompDir.y;
+						const Qdx = ux, Qdy = uy;
+						const D = -Pdx * Qdy + Qdx * Pdy;
+						if (Math.abs(D) > 1e-9) {
+							const t1 = (Qdx * (offStartY - anchor.Y) - Qdy * (offStartX - anchor.X)) / D;
+							const oldX = anchor.X, oldY = anchor.Y;
+							const newX = anchor.X + t1 * Pdx;
+							const newY = anchor.Y + t1 * Pdy;
+							// Propagate the crossover XY forward through any inherited Z-only
+							// points so vertical plunges stay vertical at the new corner XY.
+							for (let k = lastXyPointIdx; k < compensated.length; k++) {
+								if (compensated[k].X === oldX && compensated[k].Y === oldY) {
+									compensated[k].X = newX;
+									compensated[k].Y = newY;
+								} else {
+									break;
+								}
+							}
+						}
+						compensated.push({ X: offEndX, Y: offEndY, Z: z, movement_i: idx });
+					}
+
+					lastXyPointIdx = compensated.length - 1;
+					prevCompDir = { x: ux, y: uy };
+					compActive = true;
+				} else if (compActive) {
+					// Pure-Z move with comp on: inherit anchor XY at the new Z.
+					// lastXyPointIdx deliberately unchanged so a later crossover can still
+					// reach back and update this point's XY via the propagation loop.
+					const last = compensated[compensated.length - 1];
+					compensated.push({ X: last.X, Y: last.Y, Z: z, movement_i: idx });
+				}
+			} else if (compActive) {
+				// Lead-out: comp turning off on this segment. If the lead-out has XY motion,
+				// trigger a sharp-corner crossover at the start of the lead-out the same way
+				// a sustained move would — comp was still effectively active when the previous
+				// anchor was placed. Side and tool radius come from prev.state because the
+				// current modalState was already cleared to G40/null on this line.
+				const dx = x - prev.X;
+				const dy = y - prev.Y;
+				const len = Math.hypot(dx, dy);
+
+				if (len > 0) {
+					const prevState = prev.state;
+					const prevSide = prevState.radiusComp === 'G41' ? 1 : -1;
+					const prevTool = prevState.radiusCompTool != null ? prevState.tools[prevState.radiusCompTool] : null;
+					const prevR = prevTool && prevTool.r ? prevTool.r : 0;
+					if (prevR > 0) {
+						const ux = dx / len;
+						const uy = dy / len;
+						const perpX = -uy * prevSide;
+						const perpY = ux * prevSide;
+						const anchor = compensated[lastXyPointIdx];
+						const offStartX = prev.X + perpX * prevR;
+						const offStartY = prev.Y + perpY * prevR;
+						const Pdx = prevCompDir.x, Pdy = prevCompDir.y;
+						const Qdx = ux, Qdy = uy;
+						const D = -Pdx * Qdy + Qdx * Pdy;
+						if (Math.abs(D) > 1e-9) {
+							const t1 = (Qdx * (offStartY - anchor.Y) - Qdy * (offStartX - anchor.X)) / D;
+							const oldX = anchor.X, oldY = anchor.Y;
+							const newX = anchor.X + t1 * Pdx;
+							const newY = anchor.Y + t1 * Pdy;
+							for (let k = lastXyPointIdx; k < compensated.length; k++) {
+								if (compensated[k].X === oldX && compensated[k].Y === oldY) {
+									compensated[k].X = newX;
+									compensated[k].Y = newY;
+								} else {
+									break;
+								}
+							}
+						}
+					}
+				}
+
+				// Lead-out endpoint coords copy (x,y,z) exactly so the renderer detects
+				// the boundary via === equality.
+				compensated.push({ X: x, Y: y, Z: z, movement_i: idx });
+				compActive = false;
+				prevCompDir = null;
+				lastXyPointIdx = -1;
+			}
 		};
 
 		let cycleInitialZ = null;
@@ -390,6 +518,7 @@
 			}
 		}
 
+		movements.compensated = compensated;
 		return movements;
 	}
 

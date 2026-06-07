@@ -689,6 +689,7 @@ Enjoy!
 	let movements = [];
 	let cumulativeLengths = [];
 	let lineSegmentsMesh = null;
+	let compensatedMesh = null;
 	let arrowMesh = null;
 	let arrowSegmentIndices = [];
 	let arrowLength = 0;
@@ -791,10 +792,62 @@ Enjoy!
 		segmentsGroup.add(arrowMesh);
 	}
 
+	const COMP_EPSILON = 1e-6;
+
+	function buildCompensatedMesh(compensated) {
+		if (!compensated || compensated.length < 2) return;
+
+		const positions = [];
+		for (let k = 1; k < compensated.length; k++) {
+			const a = compensated[k - 1];
+			const b = compensated[k];
+
+			const bOwner = movements[b.movement_i];
+			const bStart = movements[b.movement_i - 1];
+			const isLeadInStart = bStart
+				&& Math.abs(b.X - bStart.X) < COMP_EPSILON
+				&& Math.abs(b.Y - bStart.Y) < COMP_EPSILON
+				&& Math.abs(b.Z - bStart.Z) < COMP_EPSILON;
+
+			const aOwner = movements[a.movement_i];
+			const isLeadOutEnd = aOwner
+				&& Math.abs(a.X - aOwner.X) < COMP_EPSILON
+				&& Math.abs(a.Y - aOwner.Y) < COMP_EPSILON
+				&& Math.abs(a.Z - aOwner.Z) < COMP_EPSILON
+				&& a.movement_i !== b.movement_i;
+
+			if (isLeadInStart || isLeadOutEnd) continue;
+
+			positions.push(a.X, a.Y, a.Z, b.X, b.Y, b.Z);
+		}
+
+		if (positions.length === 0) return;
+
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+
+		const dashSize = arrowLength * 0.6;
+		const material = new THREE.LineDashedMaterial({
+			color: 0xFFA500,
+			dashSize: dashSize,
+			gapSize: dashSize * 0.6,
+			depthTest: false,
+			transparent: true,
+			opacity: 0.9
+		});
+
+		compensatedMesh = new THREE.LineSegments(geometry, material);
+		compensatedMesh.computeLineDistances();
+		compensatedMesh.renderOrder = 1;
+		segmentsGroup.add(compensatedMesh);
+	}
+
 	loadBtn.addEventListener('click', () => fileInput.click());
 
 	const EXAMPLE_FILES = [
 		"example-doc-part.gcode",
+		"equilateral-triangle.gcode",
+		"radius-contours.gcode",
 		"drill-hole.gcode",
 		"mdx-drill-2.gcode",
 		"NCViewerLogo.gcode"
@@ -890,6 +943,7 @@ Enjoy!
 		const toolheadScale = arrowLength * 2;
 		toolheadGroup.scale.set(toolheadScale, toolheadScale, toolheadScale);
 		buildArrowheads();
+		buildCompensatedMesh(movements.compensated);
 
 		slider.value = 0;
 		slider.max = cumulativeLengths[cumulativeLengths.length - 1] || 0;
@@ -1004,6 +1058,13 @@ Enjoy!
 			arrowMesh.geometry.dispose();
 			arrowMesh.material.dispose();
 			arrowMesh = null;
+		}
+
+		if (compensatedMesh) {
+			segmentsGroup.remove(compensatedMesh);
+			compensatedMesh.geometry.dispose();
+			compensatedMesh.material.dispose();
+			compensatedMesh = null;
 		}
 
 		const axisLines = [];
@@ -1301,6 +1362,8 @@ Enjoy!
 			const sliderValue = parseFloat(slider.value);
 			const totalLength = cumulativeLengths[cumulativeLengths.length - 1] || 0;
 			let toolX, toolY, toolZ, toolA;
+			let compToolX, compToolY, compToolZ;
+			let circleRadius = 0;
 
 			if (cumulativeLengths.length >= 2 && sliderValue > 0 && sliderValue <= totalLength) {
 				const segIdx = sliderValueToSegmentIndex(sliderValue);
@@ -1316,12 +1379,41 @@ Enjoy!
 				toolA = (a.A ?? 0) + ((b.A ?? 0) - (a.A ?? 0)) * t;
 				toolheadGroup.position.set(toolX, toolY, toolZ);
 				toolheadGroup.visible = true;
+
+				compToolX = toolX;
+				compToolY = toolY;
+				compToolZ = toolZ;
+				const compensated = movements.compensated;
+				if (compensated && compensated.length > 0) {
+					const rangeStart = b.compIdx;
+					const rangeEnd = (segIdx + 2 < movements.length)
+						? movements[segIdx + 2].compIdx
+						: compensated.length;
+					if (rangeEnd > rangeStart) {
+						let cStart;
+						if (rangeEnd - rangeStart >= 2) {
+							cStart = compensated[rangeStart];
+						} else if (rangeStart > 0) {
+							cStart = compensated[rangeStart - 1];
+						} else {
+							cStart = compensated[rangeStart];
+						}
+						const cEnd = compensated[rangeEnd - 1];
+						compToolX = cStart.X + (cEnd.X - cStart.X) * t;
+						compToolY = cStart.Y + (cEnd.Y - cStart.Y) * t;
+						compToolZ = cStart.Z + (cEnd.Z - cStart.Z) * t;
+						circleRadius = radiusForCompState(b.state) || radiusForCompState(a.state);
+					}
+				}
 			} else {
 				toolX = endPos.x;
 				toolY = endPos.y;
 				toolZ = endPos.z;
 				toolA = movements[endIdx + 1].A ?? 0;
 				toolheadGroup.visible = false;
+				compToolX = toolX;
+				compToolY = toolY;
+				compToolZ = toolZ;
 			}
 
 			document.getElementById('posX').textContent = toolX.toFixed(3);
@@ -1348,10 +1440,17 @@ Enjoy!
 			updateWcsPanel(mvState.wcs);
 			updateToolsPanel(mvState.tools);
 
+			if (toolheadGroup.visible) {
+				updateCutterCompCircle(compToolX, compToolY, compToolZ, circleRadius);
+			} else {
+				cutterCompCircle.visible = false;
+			}
+
 		} else {
 			startMarker.visible = false;
 			endMarker.visible = false;
 			toolheadGroup.visible = false;
+			cutterCompCircle.visible = false;
 
 			document.getElementById('posX').textContent = (0).toFixed(3);
 			document.getElementById('posY').textContent = (0).toFixed(3);
@@ -1438,6 +1537,42 @@ Enjoy!
 	toolheadGroup.add(toolheadTail);
 	toolheadGroup.visible = false;
 	scene.add(toolheadGroup);
+
+	const cutterCompCircleSegments = 64;
+	const cutterCompCirclePoints = [];
+	for (let i = 0; i <= cutterCompCircleSegments; i++) {
+		const theta = (i / cutterCompCircleSegments) * Math.PI * 2;
+		cutterCompCirclePoints.push(new THREE.Vector3(Math.cos(theta), Math.sin(theta), 0));
+	}
+	const cutterCompCircleGeom = new THREE.BufferGeometry().setFromPoints(cutterCompCirclePoints);
+	const cutterCompCircleMat = new THREE.LineBasicMaterial({
+		color: 0xFFA500,
+		depthTest: false,
+		transparent: true,
+		opacity: 1.0
+	});
+	const cutterCompCircle = new THREE.Line(cutterCompCircleGeom, cutterCompCircleMat);
+	cutterCompCircle.renderOrder = 2;
+	cutterCompCircle.visible = false;
+	scene.add(cutterCompCircle);
+
+	function updateCutterCompCircle(x, y, z, radius) {
+		if (!radius || radius <= 0) {
+			cutterCompCircle.visible = false;
+			return;
+		}
+		cutterCompCircle.position.set(x, y, z);
+		cutterCompCircle.scale.set(radius, radius, 1);
+		cutterCompCircle.visible = true;
+	}
+
+	function radiusForCompState(state) {
+		if (!state) return 0;
+		if (state.radiusComp !== 'G41' && state.radiusComp !== 'G42') return 0;
+		if (state.radiusCompTool == null || !state.tools) return 0;
+		const tool = state.tools[state.radiusCompTool];
+		return tool && tool.r ? tool.r : 0;
+	}
 
 	function updateColorsForTheme(isLight) {
 		if (isLight) {
