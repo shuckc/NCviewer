@@ -1246,42 +1246,97 @@ Enjoy!
     return v.toFixed(decimals);
   }
 
-  function makeLabelSprite(text, colorHex, majorStep) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = '100 96px "Helvetica Neue", "Inter", "Segoe UI", "Arial", sans-serif';
-    ctx.letterSpacing = '9.6px';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#' + colorHex.toString(16).padStart(6, '0');
-    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  // Hand-drafted single-stroke glyphs in the spirit of Hershey simplex.
+  // Cell: 0..width across, 0..20 baseline-to-top. Each glyph is a list of
+  // sub-strokes (pen-up between sub-strokes); each sub-stroke is a polyline.
+  const STROKE_GLYPHS = {
+    '0': { width: 14, strokes: [
+      [[7,20],[12,18],[14,14],[14,6],[12,2],[7,0],[2,2],[0,6],[0,14],[2,18],[7,20]],
+    ]},
+    '1': { width: 12, strokes: [
+      [[3,15],[7,20],[7,0]],
+      [[2,0],[12,0]],
+    ]},
+    '2': { width: 14, strokes: [
+      [[1,15],[3,18],[7,20],[11,20],[13,18],[14,15],[14,12],[12,9],[1,0],[14,0]],
+    ]},
+    '3': { width: 14, strokes: [
+      [[1,18],[4,20],[10,20],[13,18],[13,14],[11,11],[7,11]],
+      [[7,11],[11,11],[13,8],[13,3],[10,0],[4,0],[1,3]],
+    ]},
+    '4': { width: 14, strokes: [
+      [[12,20],[0,8],[14,8]],
+      [[12,20],[12,0]],
+    ]},
+    '5': { width: 14, strokes: [
+      [[13,20],[2,20],[1,12],[3,13],[7,14],[11,14],[14,11],[14,6],[12,1],[8,0],[4,1],[1,3]],
+    ]},
+    '6': { width: 14, strokes: [
+      [[13,16],[9,20],[5,18],[2,14],[0,8],[0,4],[2,1],[6,0],[10,1],[13,4],[13,8],[10,11],[6,11],[2,9],[0,6]],
+    ]},
+    '7': { width: 14, strokes: [
+      [[14,20],[5,0]],
+      [[1,20],[14,20]],
+    ]},
+    '8': { width: 14, strokes: [
+      [[5,20],[2,18],[1,15],[2,12],[5,11],[10,11],[13,12],[14,15],[13,18],[10,20],[5,20]],
+      [[5,11],[2,9],[1,5],[2,2],[5,0],[10,0],[13,2],[14,5],[13,9],[10,11]],
+    ]},
+    '9': { width: 14, strokes: [
+      [[14,13],[12,15],[8,15],[4,13],[1,11],[1,8],[3,5],[6,4],[10,4],[13,5],[14,8]],
+      [[14,13],[13,5],[12,2],[10,0],[7,0],[3,2]],
+    ]},
+    '.': { width: 4, strokes: [
+      [[1,1],[3,1],[3,2],[1,2],[1,1]],
+    ]},
+    '-': { width: 14, strokes: [
+      [[2,10],[12,10]],
+    ]},
+  };
+  const STROKE_GLYPH_HEIGHT = 20;
+  const STROKE_KERN = 3;
 
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    const material = new THREE.MeshBasicMaterial({
-      map: texture,
+  function makeStrokeText(text, scale, colorHex) {
+    const positions = [];
+    let cursor = 0;
+    for (const ch of text) {
+      const glyph = STROKE_GLYPHS[ch];
+      if (!glyph) { cursor += 12 + STROKE_KERN; continue; }
+      for (const stroke of glyph.strokes) {
+        for (let i = 0; i < stroke.length - 1; i++) {
+          const a = stroke[i];
+          const b = stroke[i + 1];
+          positions.push(
+            (a[0] + cursor) * scale, a[1] * scale, 0,
+            (b[0] + cursor) * scale, b[1] * scale, 0
+          );
+        }
+      }
+      cursor += glyph.width + STROKE_KERN;
+    }
+    const totalWidth = Math.max(0, cursor - STROKE_KERN) * scale;
+    const totalHeight = STROKE_GLYPH_HEIGHT * scale;
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const material = new THREE.LineBasicMaterial({
+      color: colorHex,
       transparent: true,
+      opacity: 0.9,
       depthTest: false,
-      side: THREE.DoubleSide,
     });
-    const geometry = new THREE.PlaneGeometry(majorStep * 0.27, majorStep * 0.135);
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.renderOrder = 1;
-    return mesh;
+    const lines = new THREE.LineSegments(geometry, material);
+    lines.renderOrder = 1;
+    return { object: lines, width: totalWidth, height: totalHeight };
   }
 
   function addAxisTicks(box) {
     const marginFactor = 0.2;
     const { majorStep } = computeGridSteps(box);
-    const labelW = majorStep * 0.27;
-    const labelH = majorStep * 0.135;
-    const xLabelOffset = majorStep * 0.15;
-    const yLabelOffset = majorStep * 0.20;
-    const xTickLen = xLabelOffset - labelH / 2;
-    const yTickLen = yLabelOffset - labelW / 2;
+    const textHeight = majorStep * 0.10;
+    const textScale = textHeight / STROKE_GLYPH_HEIGHT;
+    const gap = majorStep * 0.025;
+    const tickLen = majorStep * 0.04;
 
     const axisDefs = [
       { dir: 'x', color: 0xff3653, start: box.min.x, end: box.max.x },
@@ -1307,24 +1362,25 @@ Enjoy!
         if (k === 0) continue;
         const v = k * majorStep;
 
-        let p1, p2, labelPos;
+        const { object: label, width: lw, height: lh } =
+          makeStrokeText(formatTickValue(v, majorStep), textScale, color);
+
+        let p1, p2;
         if (dir === 'x') {
-          p1 = new THREE.Vector3(v, -xTickLen, 0);
+          p1 = new THREE.Vector3(v, -tickLen, 0);
           p2 = new THREE.Vector3(v, 0, 0);
-          labelPos = new THREE.Vector3(v, -xLabelOffset, 0);
+          label.position.set(v - lw / 2, -tickLen - gap - lh, 0);
         } else {
-          p1 = new THREE.Vector3(-yTickLen, v, 0);
+          p1 = new THREE.Vector3(-tickLen, v, 0);
           p2 = new THREE.Vector3(0, v, 0);
-          labelPos = new THREE.Vector3(-yLabelOffset, v, 0);
+          label.position.set(-tickLen - gap - lw, v - lh / 2, 0);
         }
 
         const geom = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-        const line = new THREE.Line(geom, tickMat);
-        line.userData.isAxisLine = true;
-        scene.add(line);
+        const tickLine = new THREE.Line(geom, tickMat);
+        tickLine.userData.isAxisLine = true;
+        scene.add(tickLine);
 
-        const label = makeLabelSprite(formatTickValue(v, majorStep), color, majorStep);
-        label.position.copy(labelPos);
         label.userData.isAxisLine = true;
         scene.add(label);
       }
