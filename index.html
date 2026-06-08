@@ -1216,7 +1216,7 @@ Enjoy!
     const minorStep = niceStep(extent / 50);   // ~50 minor cells across
     const majorStep = minorStep * 10;
     const half = Math.ceil(extent / majorStep) * majorStep;
-    const z = box.min.z;
+    const z = 0;
 
     const minor = new THREE.GridHelper(half * 2, (half * 2) / minorStep,
         colors.gridMinor, colors.gridMinor);
