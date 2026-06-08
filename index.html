@@ -605,6 +605,7 @@
 		controls.update();
 
 		addAxisLines(box);
+		addAxisTicks(box);
 		addGridLines(box);
 	}
 
@@ -1210,11 +1211,16 @@ Enjoy!
     return m * Math.pow(10, exp);
 	}
 
-  function addGridLines(box) {
+  function computeGridSteps(box) {
     const size = box.getSize(new THREE.Vector3());
     const extent = Math.max(size.x, size.y, 1) * 2;
     const minorStep = niceStep(extent / 50);   // ~50 minor cells across
     const majorStep = minorStep * 10;
+    return { extent, minorStep, majorStep };
+  }
+
+  function addGridLines(box) {
+    const { extent, minorStep, majorStep } = computeGridSteps(box);
     const half = Math.ceil(extent / majorStep) * majorStep;
     const z = 0;
 
@@ -1232,6 +1238,96 @@ Enjoy!
         g.renderOrder = -1;                             // behind toolpath
         g.userData.isGridLine = true;
         scene.add(g);
+    });
+  }
+
+  function formatTickValue(v, majorStep) {
+    const decimals = Math.max(0, -Math.floor(Math.log10(majorStep)));
+    return v.toFixed(decimals);
+  }
+
+  function makeLabelSprite(text, colorHex, majorStep) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '100 96px "Helvetica Neue", "Inter", "Segoe UI", "Arial", sans-serif';
+    ctx.letterSpacing = '9.6px';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#' + colorHex.toString(16).padStart(6, '0');
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      side: THREE.DoubleSide,
+    });
+    const geometry = new THREE.PlaneGeometry(majorStep * 0.27, majorStep * 0.135);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.renderOrder = 1;
+    return mesh;
+  }
+
+  function addAxisTicks(box) {
+    const marginFactor = 0.2;
+    const { majorStep } = computeGridSteps(box);
+    const labelW = majorStep * 0.27;
+    const labelH = majorStep * 0.135;
+    const xLabelOffset = majorStep * 0.15;
+    const yLabelOffset = majorStep * 0.20;
+    const xTickLen = xLabelOffset - labelH / 2;
+    const yTickLen = yLabelOffset - labelW / 2;
+
+    const axisDefs = [
+      { dir: 'x', color: 0xff3653, start: box.min.x, end: box.max.x },
+      { dir: 'y', color: 0x8adb00, start: box.min.y, end: box.max.y },
+    ];
+
+    axisDefs.forEach(({ dir, color, start, end }) => {
+      const length = end - start;
+      const margin = length * marginFactor;
+      const lo = start - margin;
+      const hi = end + margin;
+      const firstK = Math.ceil(lo / majorStep);
+      const lastK = Math.floor(hi / majorStep);
+
+      const tickMat = new THREE.LineBasicMaterial({
+        color,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.8,
+      });
+
+      for (let k = firstK; k <= lastK; k++) {
+        if (k === 0) continue;
+        const v = k * majorStep;
+
+        let p1, p2, labelPos;
+        if (dir === 'x') {
+          p1 = new THREE.Vector3(v, -xTickLen, 0);
+          p2 = new THREE.Vector3(v, 0, 0);
+          labelPos = new THREE.Vector3(v, -xLabelOffset, 0);
+        } else {
+          p1 = new THREE.Vector3(-yTickLen, v, 0);
+          p2 = new THREE.Vector3(0, v, 0);
+          labelPos = new THREE.Vector3(-yLabelOffset, v, 0);
+        }
+
+        const geom = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+        const line = new THREE.Line(geom, tickMat);
+        line.userData.isAxisLine = true;
+        scene.add(line);
+
+        const label = makeLabelSprite(formatTickValue(v, majorStep), color, majorStep);
+        label.position.copy(labelPos);
+        label.userData.isAxisLine = true;
+        scene.add(label);
+      }
     });
   }
 
@@ -1600,26 +1696,36 @@ Enjoy!
 		startMarker.material.color.set(colors.selectedColor);
 		endMarker.material.color.set(colors.selectedColor);
 
-		rebuildGridForTheme();
+		rebuildOverlaysForTheme();
 
 		if (monacoEditor) {
 			monaco.editor.setTheme(isLight ? 'vs-dark' : 'vs-light');
 		}
 	}
 
-	function rebuildGridForTheme() {
+	function rebuildOverlaysForTheme() {
 		const existing = [];
+		let hadAxes = false;
 		scene.traverse(child => {
-			if (child.userData.isGridLine) existing.push(child);
+			if (child.userData.isGridLine || child.userData.isAxisLine) existing.push(child);
+			if (child.userData.isAxisLine) hadAxes = true;
 		});
 
-		existing.forEach(line => {
-			scene.remove(line);
-			line.geometry.dispose();
-			line.material.dispose();
+		existing.forEach(obj => {
+			scene.remove(obj);
+			if (obj.geometry) obj.geometry.dispose();
+			if (obj.material) {
+				if (obj.material.map) obj.material.map.dispose();
+				obj.material.dispose();
+			}
 		});
 
-		addGridLines(getNonEmptySegmentBox());
+		const box = getNonEmptySegmentBox();
+		if (hadAxes) {
+			addAxisLines(box);
+			addAxisTicks(box);
+		}
+		addGridLines(box);
 	}
 
 	applyTheme(isLight);
