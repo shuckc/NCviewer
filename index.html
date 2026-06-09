@@ -1332,18 +1332,24 @@ Enjoy!
 
   function addAxisTicks(box) {
     const marginFactor = 0.2;
-    const { majorStep } = computeGridSteps(box);
-    const textHeight = majorStep * 0.10;
-    const textScale = textHeight / STROKE_GLYPH_HEIGHT;
-    const gap = majorStep * 0.025;
-    const tickLen = majorStep * 0.04;
+    const { majorStep: xyMajorStep } = computeGridSteps(box);
+    const zRange = Math.max(box.max.z - box.min.z, 0.01);
+    const zMajorStep = niceStep(zRange / 5);
 
     const axisDefs = [
-      { dir: 'x', color: 0xff3653, start: box.min.x, end: box.max.x },
-      { dir: 'y', color: 0x8adb00, start: box.min.y, end: box.max.y },
+      { dir: 'x', color: 0xff3653, start: box.min.x, end: box.max.x, majorStep: xyMajorStep },
+      { dir: 'y', color: 0x8adb00, start: box.min.y, end: box.max.y, majorStep: xyMajorStep },
+      { dir: 'z', color: 0x2c8fff, start: box.min.z, end: box.max.z, majorStep: zMajorStep },
     ];
 
-    axisDefs.forEach(({ dir, color, start, end }) => {
+    axisDefs.forEach(({ dir, color, start, end, majorStep }) => {
+      if (!isFinite(majorStep) || majorStep <= 0) return;
+
+      const textHeight = majorStep * 0.10;
+      const textScale = textHeight / STROKE_GLYPH_HEIGHT;
+      const gap = majorStep * 0.025;
+      const tickLen = majorStep * 0.04;
+
       const length = end - start;
       const margin = length * marginFactor;
       const lo = start - margin;
@@ -1370,10 +1376,15 @@ Enjoy!
           p1 = new THREE.Vector3(v, -tickLen, 0);
           p2 = new THREE.Vector3(v, 0, 0);
           label.position.set(v - lw / 2, -tickLen - gap - lh, 0);
-        } else {
+        } else if (dir === 'y') {
           p1 = new THREE.Vector3(-tickLen, v, 0);
           p2 = new THREE.Vector3(0, v, 0);
           label.position.set(-tickLen - gap - lw, v - lh / 2, 0);
+        } else { // 'z' — tick and label in the XZ plane, on -X side of Z axis
+          p1 = new THREE.Vector3(-tickLen, 0, v);
+          p2 = new THREE.Vector3(0, 0, v);
+          label.rotation.x = Math.PI / 2;
+          label.position.set(-tickLen - gap - lw, 0, v - lh / 2);
         }
 
         const geom = new THREE.BufferGeometry().setFromPoints([p1, p2]);
