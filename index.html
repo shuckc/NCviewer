@@ -696,6 +696,12 @@ Enjoy!
 	let arrowLength = 0;
 	let loadedFilename = "gcode.txt";
 
+	function rotateX(x, y, z, aDeg) {
+		const t = (aDeg || 0) * Math.PI / 180;
+		const c = Math.cos(t), s = Math.sin(t);
+		return new THREE.Vector3(x, y * c - z * s, y * s + z * c);
+	}
+
 	function segmentIndexToSliderValue(idx) {
 		return cumulativeLengths[idx + 1] ?? 0;
 	}
@@ -746,8 +752,8 @@ Enjoy!
 			if (cumulativeSinceLastCone < minConeSpacing) continue;
 
 			const prev = movements[i - 1];
-			const start = new THREE.Vector3(prev.X, prev.Y, prev.Z);
-			const end = new THREE.Vector3(mv.X, mv.Y, mv.Z);
+			const start = rotateX(prev.X, prev.Y, prev.Z, prev.A);
+			const end = rotateX(mv.X, mv.Y, mv.Z, mv.A);
 			const delta = new THREE.Vector3().subVectors(end, start);
 			const segmentLength = delta.length();
 			if (segmentLength === 0) continue;
@@ -819,7 +825,9 @@ Enjoy!
 
 			if (isLeadInStart || isLeadOutEnd) continue;
 
-			positions.push(a.X, a.Y, a.Z, b.X, b.Y, b.Z);
+			const aRot = rotateX(a.X, a.Y, a.Z, aOwner ? aOwner.A : 0);
+			const bRot = rotateX(b.X, b.Y, b.Z, bOwner ? bOwner.A : 0);
+			positions.push(aRot.x, aRot.y, aRot.z, bRot.x, bRot.y, bRot.z);
 		}
 
 		if (positions.length === 0) return;
@@ -923,15 +931,18 @@ Enjoy!
 		cumulativeLengths[0] = 0;
 
 		for (let i = 1; i < movements.length; i++) {
-			const start = new THREE.Vector3(movements[i - 1].X, movements[i - 1].Y, movements[i - 1].Z);
-			const end = new THREE.Vector3(movements[i].X, movements[i].Y, movements[i].Z);
-			const isRapid = movements[i].command === 'G0';
+			const prev = movements[i - 1];
+			const mv = movements[i];
+			const start = rotateX(prev.X, prev.Y, prev.Z, prev.A);
+			const end = rotateX(mv.X, mv.Y, mv.Z, mv.A);
+			const isRapid = mv.command === 'G0';
 			const color = isRapid ? colorRapid : colorFeed;
 
 			positions.push(start.x, start.y, start.z, end.x, end.y, end.z);
 			colorsArray.push(color.r, color.g, color.b, color.r, color.g, color.b);
 
-			cumulativeLengths[i] = cumulativeLengths[i - 1] + start.distanceTo(end);
+			const machineLen = Math.hypot(mv.X - prev.X, mv.Y - prev.Y, mv.Z - prev.Z);
+			cumulativeLengths[i] = cumulativeLengths[i - 1] + machineLen;
 		}
 
 		const geometry = new THREE.BufferGeometry();
@@ -1515,11 +1526,13 @@ Enjoy!
 		}
 
 		if (startIdx < movements.length - 1) {
-			const startPos = new THREE.Vector3(movements[startIdx].X, movements[startIdx].Y, movements[startIdx].Z);
-			const endPos = new THREE.Vector3(movements[endIdx + 1].X, movements[endIdx + 1].Y, movements[endIdx + 1].Z);
+			const startMv = movements[startIdx];
+			const endMv = movements[endIdx + 1];
+			const startPos = new THREE.Vector3(startMv.X, startMv.Y, startMv.Z);
+			const endPos = new THREE.Vector3(endMv.X, endMv.Y, endMv.Z);
 
-			startMarker.position.copy(startPos);
-			endMarker.position.copy(endPos);
+			startMarker.position.copy(rotateX(startPos.x, startPos.y, startPos.z, startMv.A));
+			endMarker.position.copy(rotateX(endPos.x, endPos.y, endPos.z, endMv.A));
 
 			startMarker.visible = true;
 			endMarker.visible = true;
@@ -1542,7 +1555,8 @@ Enjoy!
 				toolY = a.Y + (b.Y - a.Y) * t;
 				toolZ = a.Z + (b.Z - a.Z) * t;
 				toolA = (a.A ?? 0) + ((b.A ?? 0) - (a.A ?? 0)) * t;
-				toolheadGroup.position.set(toolX, toolY, toolZ);
+				toolheadGroup.position.copy(rotateX(toolX, toolY, toolZ, toolA));
+				toolheadGroup.rotation.set((toolA || 0) * Math.PI / 180, 0, 0);
 				toolheadGroup.visible = true;
 
 				compToolX = toolX;
@@ -1606,7 +1620,8 @@ Enjoy!
 			updateToolsPanel(mvState.tools);
 
 			if (toolheadGroup.visible) {
-				updateCutterCompCircle(compToolX, compToolY, compToolZ, circleRadius);
+				const compRot = rotateX(compToolX, compToolY, compToolZ, toolA);
+				updateCutterCompCircle(compRot.x, compRot.y, compRot.z, circleRadius, toolA);
 			} else {
 				cutterCompCircle.visible = false;
 			}
@@ -1721,13 +1736,14 @@ Enjoy!
 	cutterCompCircle.visible = false;
 	scene.add(cutterCompCircle);
 
-	function updateCutterCompCircle(x, y, z, radius) {
+	function updateCutterCompCircle(x, y, z, radius, aDeg) {
 		if (!radius || radius <= 0) {
 			cutterCompCircle.visible = false;
 			return;
 		}
 		cutterCompCircle.position.set(x, y, z);
 		cutterCompCircle.scale.set(radius, radius, 1);
+		cutterCompCircle.rotation.set((aDeg || 0) * Math.PI / 180, 0, 0);
 		cutterCompCircle.visible = true;
 	}
 
