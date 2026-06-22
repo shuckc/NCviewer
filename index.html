@@ -1422,6 +1422,7 @@ Enjoy!
 		'G3': 'G3 ccw circular',
 		'G4': 'G4 dwell'
 	};
+	const UNITS_LABELS = {'mm': 'G20 inch', 'mm': 'G21 mm'};
 	const RADIUS_COMP_LABELS = { 'G40': 'G40 off', 'G41': 'G41 left', 'G42': 'G42 right' };
 	const MOTION_MODE_LABELS = { 'G90': 'G90 absolute', 'G91': 'G91 incremental' };
 	const CYCLE_MOTION_LABELS = {
@@ -1604,7 +1605,7 @@ Enjoy!
 			document.getElementById('feedrate').textContent = mvState.feedrate ?? 0;
 			document.getElementById('spindle').textContent = mvState.spindleOn ? (mvState.spindleSpeed ?? 0) : 0;
 			document.getElementById('planeText').textContent = PLANE_LABELS[mvState.plane] ?? mvState.plane;
-			document.getElementById('unitsText').textContent = mvState.units;
+			document.getElementById('unitsText').textContent = UNITS_LABELS[mvState.units] ?? mvState.units;
 			document.getElementById('motionText').textContent = MOTION_LABELS[mvState.motion] ?? mvState.motion;
 			document.getElementById('motionModeText').textContent = MOTION_MODE_LABELS[mvState.motionMode] ?? mvState.motionMode;
 			document.getElementById('wcsText').textContent = mvState.activeWcs;
